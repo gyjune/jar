@@ -1,6 +1,5 @@
 package com.github.catvod.spider;
 
-import android.content.Context;
 import android.text.TextUtils;
 
 import org.json.JSONArray;
@@ -24,11 +23,6 @@ public class Gqc extends Spider {
 
     private static final String HOST = "https://gqc7.top";
     private static final String BAOFENG_API = "https://dm.baofeng.la/qcb.php";
-
-    @Override
-    public void init(Context context, String extend) {
-        super.init(context, extend);
-    }
 
     // ============================================================
     // 首页分类
@@ -233,7 +227,9 @@ public class Gqc extends Spider {
                 }
 
                 String name = line.text();
-                if (span != null) name = name.replace(span.text(), "").trim();
+                if (span != null && !span.text().isEmpty()) {
+                    name = name.replace(span.text(), "").trim();
+                }
 
                 List<String> eps = new ArrayList<>();
                 for (int n = 1; n <= count; n++) {
