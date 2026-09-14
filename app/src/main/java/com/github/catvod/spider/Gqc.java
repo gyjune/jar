@@ -47,7 +47,6 @@ public class Gqc extends Spider {
                 obj.put("type_name", c[1]);
                 classes.put(obj);
             }
-
             result.put("class", classes);
 
             if (filter) {
@@ -59,7 +58,6 @@ public class Gqc extends Spider {
                 filters.put("duanju", buildFilter());
                 result.put("filters", filters);
             }
-
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
@@ -127,7 +125,7 @@ public class Gqc extends Spider {
     }
 
     // ============================================================
-    // 分类（Jsoup 解析）
+    // 分类
     // ============================================================
 
     @Override
@@ -205,7 +203,6 @@ public class Gqc extends Spider {
             Element desc = doc.selectFirst("div.fed-part-esan");
             if (desc != null) info.put("vod_content", desc.text().trim());
 
-            // 抓线路
             Elements lineEls = doc.select("a.fed-btns-info");
             List<String> froms = new ArrayList<>();
             List<String> urls = new ArrayList<>();
@@ -219,17 +216,24 @@ public class Gqc extends Spider {
 
                 String vid = m.group(1);
                 String sid = m.group(2);
+                String nid = m.group(3);
 
+                // 只抓每集的第一个（nid=1），也就是线路按钮
+                if (!nid.equals("1")) continue;
+
+                // 只抓有 <span> 子元素的（线路按钮）
                 Element span = line.selectFirst("span");
-                int count = 1;
-                if (span != null) {
-                    try { count = Integer.parseInt(span.text().trim()); } catch (Exception e) {}
-                }
+                if (span == null) continue;
 
-                String name = line.text();
-                if (span != null && !span.text().isEmpty()) {
-                    name = name.replace(span.text(), "").trim();
-                }
+                int count = 1;
+                try { count = Integer.parseInt(span.text().trim()); } catch (Exception e) {}
+
+                // 用 ownText() 只取自身文本，排除 <span> 里的数字
+                String name = line.ownText().trim();
+
+                // 跳过「立即播放」和空名字
+                if (name.contains("立即播放")) continue;
+                if (name.isEmpty()) continue;
 
                 List<String> eps = new ArrayList<>();
                 for (int n = 1; n <= count; n++) {
@@ -288,7 +292,7 @@ public class Gqc extends Spider {
     }
 
     // ============================================================
-    // 播放（先暴风，失败走苹果CMS兜底）
+    // 播放
     // ============================================================
 
     @Override
