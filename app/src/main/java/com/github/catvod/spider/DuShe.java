@@ -12,6 +12,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -49,6 +50,14 @@ public class DuShe extends Spider {
         h.put("Referer", API_HOST + "/");
         h.put("Accept", "*/*");
         return h;
+    }
+
+    private String headerToJson(Map<String, String> map) {
+        JSONObject o = new JSONObject();
+        try {
+            for (Map.Entry<String, String> e : map.entrySet()) o.put(e.getKey(), e.getValue());
+        } catch (Exception ignored) {}
+        return o.toString();
     }
 
     private String fetchHtml(String url) {
@@ -125,26 +134,38 @@ public class DuShe extends Spider {
         JSONArray list = new JSONArray();
         if (TextUtils.isEmpty(html)) return list;
 
-        Pattern itemP = Pattern.compile(
-                "<a[^>]*class=\"[^\"]*module-poster-item[^\"]*\"[^>]*>.*?</a>\\s*</div>",
-                Pattern.DOTALL);
-        Matcher itemM = itemP.matcher(html);
+        Document doc = Jsoup.parse(html);
+        Elements items = doc.select("a.module-poster-item");
+        if (items.isEmpty()) items = doc.select("a[href^=/album/]");
 
-        while (itemM.find()) {
-            String item = itemM.group();
-            String href = find(Pattern.compile("<a[^>]*href=\"([^\"]+)\"[^>]*>"), item);
+        for (Element a : items) {
+            String href = a.attr("href");
             if (TextUtils.isEmpty(href) || !href.startsWith("/album/")) continue;
 
-            String title = find(Pattern.compile(
-                    "<div[^>]*class=\"[^\"]*module-poster-item-title[^\"]*\"[^>]*>([^<]+)</div>"), item);
-            if (TextUtils.isEmpty(title)) continue;
+            String name = a.attr("title").trim();
+            if (TextUtils.isEmpty(name)) {
+                Element t = a.selectFirst(".module-poster-item-title");
+                if (t != null) name = t.text().trim();
+            }
+            if (TextUtils.isEmpty(name)) continue;
 
-            String pic = find(Pattern.compile("data-original=\"([^\"]+)\""), item);
+            String pic = "";
+            Element img = a.selectFirst("img");
+            if (img != null) {
+                pic = img.attr("data-original");
+                if (TextUtils.isEmpty(pic)) pic = img.attr("src");
+                if (pic.endsWith("/load.gif")) pic = "";
+            }
+
+            String remark = "";
+            Element note = a.selectFirst(".module-item-note");
+            if (note != null) remark = note.text().trim();
 
             JSONObject vod = new JSONObject();
             vod.put("vod_id", href);
-            vod.put("vod_name", title.trim());
+            vod.put("vod_name", name);
             vod.put("vod_pic", fixUrl(pic));
+            vod.put("vod_remarks", remark);
             list.put(vod);
         }
         return list;
@@ -154,33 +175,73 @@ public class DuShe extends Spider {
         JSONArray list = new JSONArray();
         if (TextUtils.isEmpty(html)) return list;
 
-        Pattern itemP = Pattern.compile(
-                "<div class=\"module-card-item module-item\">.*?</div>\\s*</div>\\s*</div>",
-                Pattern.DOTALL);
-        Matcher itemM = itemP.matcher(html);
+        Document doc = Jsoup.parse(html);
+        Elements items = doc.select("div.module-card-item");
 
-        while (itemM.find()) {
-            String item = itemM.group();
-            String href = find(Pattern.compile("<a[^>]*href=\"(/album/[^\"]+)\"[^>]*>"), item);
+        if (items.isEmpty()) {
+            // 兜底
+            Elements fallback = doc.select("a[href^=/album/]");
+            for (Element a : fallback) {
+                String href = a.attr("href");
+                if (TextUtils.isEmpty(href) || !href.startsWith("/album/")) continue;
+
+                String name = a.attr("title").trim();
+                if (TextUtils.isEmpty(name)) {
+                    Element t = a.selectFirst(".module-card-item-title");
+                    if (t != null) name = t.text().trim();
+                }
+                if (TextUtils.isEmpty(name)) continue;
+
+                String pic = "";
+                Element img = a.selectFirst("img");
+                if (img != null) {
+                    pic = img.attr("data-original");
+                    if (TextUtils.isEmpty(pic)) pic = img.attr("src");
+                    if (pic.endsWith("/load.gif")) pic = "";
+                }
+
+                JSONObject vod = new JSONObject();
+                vod.put("vod_id", href);
+                vod.put("vod_name", name);
+                vod.put("vod_pic", fixUrl(pic));
+                list.put(vod);
+            }
+            return list;
+        }
+
+        for (Element item : items) {
+            Element a = item.selectFirst("a[href^=/album/]");
+            if (a == null) continue;
+            String href = a.attr("href");
             if (TextUtils.isEmpty(href)) continue;
 
-            String title = find(Pattern.compile(
-                    "<div[^>]*class=\"[^\"]*module-card-item-title[^\"]*\"[^>]*>.*?<strong>([^<]+)</strong>.*?</a>", Pattern.DOTALL), item);
-            if (TextUtils.isEmpty(title)) {
-                title = find(Pattern.compile(
-                        "<div[^>]*class=\"[^\"]*module-card-item-title[^\"]*\"[^>]*>.*?<a[^>]*>([^<]+)</a>", Pattern.DOTALL), item);
+            String name = "";
+            Element s = item.selectFirst(".module-card-item-title strong");
+            if (s != null) name = s.text().trim();
+            if (TextUtils.isEmpty(name)) {
+                Element t = item.selectFirst(".module-card-item-title");
+                if (t != null) name = t.text().trim();
             }
-            if (TextUtils.isEmpty(title)) continue;
+            if (TextUtils.isEmpty(name)) name = a.attr("title").trim();
+            if (TextUtils.isEmpty(name)) continue;
 
-            String category = find(Pattern.compile(
-                    "<div class=\"module-card-item-class\">([^<]+)</div>"), item);
-            String pic = find(Pattern.compile("data-original=\"([^\"]+)\""), item);
+            String category = "";
+            Element c = item.selectFirst(".module-card-item-class");
+            if (c != null) category = c.text().trim();
+
+            String pic = "";
+            Element img = item.selectFirst("img");
+            if (img != null) {
+                pic = img.attr("data-original");
+                if (TextUtils.isEmpty(pic)) pic = img.attr("src");
+                if (pic.endsWith("/load.gif")) pic = "";
+            }
 
             JSONObject vod = new JSONObject();
             vod.put("vod_id", href);
-            vod.put("vod_name", title.trim());
+            vod.put("vod_name", name);
             vod.put("vod_pic", fixUrl(pic));
-            vod.put("vod_class", category.trim());
+            vod.put("vod_class", category);
             list.put(vod);
         }
         return list;
@@ -231,26 +292,28 @@ public class DuShe extends Spider {
         info.put("vod_play_from", "");
         info.put("vod_play_url", "");
 
-        String title = find(Pattern.compile("<h1>([^<]+)</h1>"), html);
-        if (!TextUtils.isEmpty(title)) info.put("vod_name", title.trim());
+        Document doc = Jsoup.parse(html);
 
-        String pic = find(Pattern.compile(
-                "<div class=\"module-item-pic\">\\s*<img[^>]*data-original=\"([^\"]+)\""), html);
-        if (!TextUtils.isEmpty(pic)) info.put("vod_pic", fixUrl(pic));
+        Element h1 = doc.selectFirst("h1");
+        if (h1 != null) info.put("vod_name", h1.text().trim());
 
-        // 标签：年份/地区/分类
+        Element pic = doc.selectFirst("div.module-item-pic img");
+        if (pic != null) {
+            String p = pic.attr("data-original");
+            if (TextUtils.isEmpty(p)) p = pic.attr("src");
+            info.put("vod_pic", fixUrl(p));
+        }
+
+        // 标签：年份 / 地区 / 分类
         String year = "";
         String area = "";
         StringBuilder cls = new StringBuilder();
-        Matcher tagM = Pattern.compile(
-                "<div class=\"module-info-tag-link\">\\s*<a[^>]*>([^<]+)</a>\\s*</div>").matcher(html);
-        while (tagM.find()) {
-            String tag = tagM.group(1).trim();
-            if (tag.matches("^\\d{4}$")) {
-                year = tag;
-            } else if (isArea(tag)) {
-                area = tag;
-            } else {
+        Elements tags = doc.select("div.module-info-tag-link a");
+        for (Element t : tags) {
+            String tag = t.text().trim();
+            if (tag.matches("^\\d{4}$")) year = tag;
+            else if (isArea(tag)) area = tag;
+            else {
                 if (cls.length() > 0) cls.append("/");
                 cls.append(tag);
             }
@@ -259,64 +322,55 @@ public class DuShe extends Spider {
         info.put("vod_area", area);
         info.put("vod_class", cls.toString());
 
-        String desc = find(Pattern.compile(
-                "<div class=\"module-info-introduction-content\">\\s*<p>([^<]+)</p>"), html);
-        if (!TextUtils.isEmpty(desc)) info.put("vod_content", desc.trim());
+        Element desc = doc.selectFirst("div.module-info-introduction-content p");
+        if (desc != null) info.put("vod_content", desc.text().trim());
 
-        String directorBlock = find(Pattern.compile(
-                "<span class=\"module-info-item-title\">导演：</span>\\s*<div class=\"module-info-item-content\">\\s*(.*?)</div>",
-                Pattern.DOTALL), html);
-        if (!TextUtils.isEmpty(directorBlock)) {
+        // 导演 / 主演
+        Elements blocks = doc.select("div.module-info-item");
+        for (Element b : blocks) {
+            Element title = b.selectFirst("span.module-info-item-title");
+            if (title == null) continue;
+            String tname = title.text().trim();
+            Element content = b.selectFirst("div.module-info-item-content");
+            if (content == null) continue;
+
             List<String> names = new ArrayList<>();
-            Matcher m = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(directorBlock);
-            while (m.find()) names.add(m.group(1).trim());
-            info.put("vod_director", TextUtils.join("/", names));
+            for (Element link : content.select("a")) names.add(link.text().trim());
+            if (names.isEmpty()) names.add(content.text().trim());
+
+            if (tname.contains("导演")) info.put("vod_director", TextUtils.join("/", names));
+            else if (tname.contains("主演")) info.put("vod_actor", TextUtils.join("/", names));
         }
 
-        String actorBlock = find(Pattern.compile(
-                "<span class=\"module-info-item-title\">主演：</span>\\s*<div class=\"module-info-item-content\">\\s*(.*?)</div>",
-                Pattern.DOTALL), html);
-        if (!TextUtils.isEmpty(actorBlock)) {
-            List<String> names = new ArrayList<>();
-            Matcher m = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(actorBlock);
-            while (m.find()) names.add(m.group(1).trim());
-            info.put("vod_actor", TextUtils.join("/", names));
-        }
-
-        // 播放列表
+        // 播放线路
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
 
-        List<String> cleanFromNames = new ArrayList<>();
-        Matcher fromM = Pattern.compile(
-                "<label class=\"module-tab-name\">\\s*<span[^>]*>([^<]+)</span>").matcher(html);
-        while (fromM.find()) cleanFromNames.add(fromM.group(1).trim());
+        List<String> fromNames = new ArrayList<>();
+        for (Element l : doc.select("label.module-tab-name span")) fromNames.add(l.text().trim());
+        if (fromNames.isEmpty()) {
+            for (Element l : doc.select("div.module-tab-item span")) fromNames.add(l.text().trim());
+        }
 
-        Pattern blockP = Pattern.compile(
-                "<div class=\"module-list sort-list tab-list[^\"]*\" id=\"panel[^\"]*\">\\s*"
-                        + "<div class=\"module-play-list\">\\s*"
-                        + "<div class=\"module-play-list-content[^\"]*\">(.*?)</div>\\s*</div>\\s*</div>",
-                Pattern.DOTALL);
-        Matcher blockM = blockP.matcher(html);
+        Elements panels = doc.select("div.module-list.sort-list.tab-list");
+        if (panels.isEmpty()) panels = doc.select("div.module-play-list");
+
         int idx = 0;
-        while (blockM.find()) {
-            String block = blockM.group(1);
+        for (Element panel : panels) {
             List<String> eps = new ArrayList<>();
-            Matcher epM = Pattern.compile(
-                    "<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>")
-                    .matcher(block);
-            while (epM.find()) {
-                String epUrl = epM.group(1);
-                String epName = epM.group(2).trim();
-                eps.add(epName + "$" + fixUrl(epUrl));
+            for (Element a : panel.select("a.module-play-list-link")) {
+                String href = a.attr("href");
+                String epName = a.text().trim();
+                if (TextUtils.isEmpty(href) || TextUtils.isEmpty(epName)) continue;
+                eps.add(epName + "$" + fixUrl(href));
             }
             if (!eps.isEmpty()) {
-                String fromName = (idx < cleanFromNames.size() && !TextUtils.isEmpty(cleanFromNames.get(idx)))
-                        ? cleanFromNames.get(idx) : ("线路" + (idx + 1));
+                String fromName = (idx < fromNames.size() && !TextUtils.isEmpty(fromNames.get(idx)))
+                        ? fromNames.get(idx) : ("线路" + (idx + 1));
                 playFrom.add(fromName);
                 playUrl.add(TextUtils.join("#", eps));
+                idx++;
             }
-            idx++;
         }
 
         info.put("vod_play_from", TextUtils.join("$$$", playFrom));
@@ -326,7 +380,7 @@ public class DuShe extends Spider {
 
     private boolean isArea(String tag) {
         String[] areas = {"中国大陆", "中国香港", "中国台湾", "美国", "韩国", "日本",
-                "英国", "法国", "泰国"};
+                "英国", "法国", "泰国", "德国", "印度"};
         for (String a : areas) if (a.equals(tag)) return true;
         return false;
     }
@@ -360,8 +414,7 @@ public class DuShe extends Spider {
                             + "&t=" + URLEncoder.encode(from, "UTF-8")
                             + "&d=v2";
                 }
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
 
         Matcher ifM = Pattern.compile("<iframe[^>]*src=\"([^\"]+)\"[^>]*>").matcher(html);
@@ -371,7 +424,7 @@ public class DuShe extends Spider {
             Matcher urlM = Pattern.compile("[?&]url=([^&]+)").matcher(src);
             if (urlM.find()) {
                 try {
-                    String decoded = java.net.URLDecoder.decode(urlM.group(1), "UTF-8");
+                    String decoded = URLDecoder.decode(urlM.group(1), "UTF-8");
                     return PROXY_HOST + "/?url=" + URLEncoder.encode(decoded, "UTF-8") + "&d=v2";
                 } catch (Exception ignored) {}
             }
@@ -417,7 +470,6 @@ public class DuShe extends Spider {
     private JSONArray buildFilter(String type) throws Exception {
         JSONArray arr = new JSONArray();
 
-        // class
         JSONArray classValues = new JSONArray();
         if ("movie".equals(type)) {
             classValues.put(item("电影", "dianying"));
@@ -448,7 +500,6 @@ public class DuShe extends Spider {
         classObj.put("value", classValues);
         arr.put(classObj);
 
-        // area
         JSONArray areaValues = new JSONArray();
         areaValues.put(item("全部地区", ""));
         String[] areas = {"中国大陆", "中国香港", "中国台湾", "美国", "法国", "英国",
@@ -460,7 +511,6 @@ public class DuShe extends Spider {
         areaObj.put("value", areaValues);
         arr.put(areaObj);
 
-        // year
         JSONArray yearValues = new JSONArray();
         yearValues.put(item("全部年份", ""));
         for (int y = 2026; y >= 2015; y--) yearValues.put(item(String.valueOf(y), String.valueOf(y)));
@@ -470,7 +520,6 @@ public class DuShe extends Spider {
         yearObj.put("value", yearValues);
         arr.put(yearObj);
 
-        // sort
         JSONArray sortValues = new JSONArray();
         sortValues.put(item("默认排序", ""));
         sortValues.put(item("按时间", "time"));
@@ -587,11 +636,10 @@ public class DuShe extends Spider {
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         JSONObject result = new JSONObject();
 
-        // 已经是直链
         if (id != null && id.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
             result.put("parse", 0);
             result.put("url", id);
-            result.put("header", new JSONObject(getM3u8Header()).toString());
+            result.put("header", headerToJson(getM3u8Header()));
             return result.toString();
         }
 
@@ -599,7 +647,7 @@ public class DuShe extends Spider {
         if (TextUtils.isEmpty(html)) {
             result.put("parse", 1);
             result.put("url", id);
-            result.put("header", new JSONObject(getHeader()).toString());
+            result.put("header", headerToJson(getHeader()));
             return result.toString();
         }
 
@@ -610,24 +658,24 @@ public class DuShe extends Spider {
                 h.put("Referer", API_HOST + "/");
                 result.put("parse", 1);
                 result.put("url", playUrl);
-                result.put("header", new JSONObject(h).toString());
+                result.put("header", headerToJson(h));
                 return result.toString();
             }
             if (playUrl.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
                 result.put("parse", 0);
                 result.put("url", playUrl);
-                result.put("header", new JSONObject(getM3u8Header()).toString());
+                result.put("header", headerToJson(getM3u8Header()));
                 return result.toString();
             }
             result.put("parse", 1);
             result.put("url", playUrl);
-            result.put("header", new JSONObject(getHeader()).toString());
+            result.put("header", headerToJson(getHeader()));
             return result.toString();
         }
 
         result.put("parse", 1);
         result.put("url", id);
-        result.put("header", new JSONObject(getHeader()).toString());
+        result.put("header", headerToJson(getHeader()));
         return result.toString();
     }
 }
