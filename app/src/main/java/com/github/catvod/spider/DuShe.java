@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * 播放走 v.dushe.online 代理
  *
  * 站点结构分析（基于2026-09 HTML逆向）:
- * - 分类列表: /show/{type}-{area}-time-{genre}-{lang}-{letter}-{p1}-{p2}-{p3}-{p4}-{year}.html
+ * - 分类列表: /show/{type}-{area}-{sort}-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
  * - 详情页: /album/{id}.html
  * - 播放页: /play/{id}-{sid}-{nid}.html
  * - 列表项: a.module-poster-item.module-item > .module-poster-item-title / .module-item-note / img[data-original]
@@ -104,7 +104,7 @@ public class DuShe extends Spider {
     /**
      * 构建分类列表页URL
      * 实际站点URL模板（12段）:
-     * /show/{type}-{area}-time-{genre}-{lang}-{letter}-{p1}-{p2}-{p3}-{p4}-{year}.html
+     * /show/{type}-{area}-{sort}-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
      *
      * 段含义:
      * 1. type: 类型标识 (dianying/dianshiju/guochan/gangju/hanju等)
@@ -137,8 +137,26 @@ public class DuShe extends Spider {
         String letter = params != null ? params.getOrDefault("letter", "") : "";
         String year = params != null ? params.getOrDefault("year", "") : "";
 
-        // URL模板: {type}-{area}-time-{genre}-{lang}-{letter}-{p1}-{p2}-{p3}-{p4}-{year}
-        // 共12段，用-连接
+        // 如果没有任何筛选参数，使用基础类型URL格式: {type}-----------.html
+        boolean allFiltersEmpty = area.isEmpty() && genre.isEmpty()
+                && language.isEmpty() && letter.isEmpty() && year.isEmpty();
+        if (allFiltersEmpty) {
+            return API_HOST + "/show/" + type + "-----------.html";
+        }
+
+        // 实际站点URL模板（12段，11个短横线）:
+        // /show/{type}-{area}-{sort}-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
+        // 段含义:
+        // 1. type: 类型标识 (guochan/dianying/dianshiju等)
+        // 2. area: 地区 (URL编码)
+        // 3. sort: 排序 (time/hits/score)
+        // 4. genre: 剧情 (URL编码)
+        // 5. lang: 语言 (URL编码)
+        // 6. letter: 字母 (A-Z或空)
+        // 7-8. p1-p2: 空段(预留)
+        // 9. page: 页码(第1页时空字符串)
+        // 10-11. p3-p4: 空段(预留)
+        // 12. year: 年份
         List<String> parts = new ArrayList<>();
         parts.add(type);                          // 1. type
         parts.add(area);                          // 2. area
@@ -146,16 +164,15 @@ public class DuShe extends Spider {
         parts.add(genre);                         // 4. genre
         parts.add(language);                      // 5. language
         parts.add(letter);                        // 6. letter
-        parts.add("");                            // 7. p1 (预留/分页)
-        parts.add("");                            // 8. p2
-        parts.add("");                            // 9. p3
-        parts.add("");                            // 10. p4
-        parts.add(year);                          // 11. year
+        parts.add("");                            // 7. p1 (预留)
+        parts.add("");                            // 8. p2 (预留)
+        parts.add(page > 1 ? String.valueOf(page) : ""); // 9. page
+        parts.add("");                            // 10. p3 (预留)
+        parts.add("");                            // 11. p4 (预留)
+        parts.add(year);                          // 12. year
 
-        // 分页：将页码放在p1位置（第7段）
-        if (page > 1) {
-            parts.set(6, String.valueOf(page));
-        }
+        // 分页：页码放在第9段（index 8）
+        // (已由上面parts.add(page > 1 ? String.valueOf(page) : "")处理)
 
         // URL编码area/genre/language（如果非空）
         if (!area.isEmpty()) {
@@ -171,8 +188,7 @@ public class DuShe extends Spider {
         String urlPath = TextUtils.join("-", parts);
         return API_HOST + "/show/" + urlPath + ".html";
     }
-
-    // ================== 列表解析 ==================
+// ================== 列表解析 ==================
 
     /**
      * 解析分类列表页
@@ -779,24 +795,4 @@ public class DuShe extends Spider {
         if (id != null && id.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
             result.put("parse", 0);
             result.put("url", id);
-            result.put("header", headerToJson(getM3u8Header()));
-            return result.toString();
-        }
-
-        String html = fetchHtml(id);
-        if (html.isEmpty()) {
-            result.put("parse", 1);
-            result.put("url", id);
-            result.put("header", headerToJson(getHeader()));
-            return result.toString();
-        }
-
-        String playUrl = extractPlayUrl(html);
-        if (playUrl != null && !playUrl.isEmpty()) {
-            if (playUrl.contains("v.dushe.online")) {
-                Map<String, String> h = getHeader();
-                h.put("Referer", API_HOST + "/");
-                result.put("parse", 1);
-                result.put("url", playUrl);
-                result.put("header", headerToJson(h));
-                return result.toString();
+            result.put("h
