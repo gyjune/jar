@@ -24,13 +24,15 @@ import java.util.regex.Pattern;
  * 毒舌电影 - www.dushehub.com
  * 播放走 v.dushe.online 代理
  *
- * 站点结构分析（基于2026-09 HTML逆向）:
- * - 分类列表: /show/{type}-{area}-{sort}-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
+ * 站点结构分析（基于2026-09 HTML逆向 + JS参考）:
+ * - 分类列表: /show/{type}-{area}-time-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
  * - 详情页: /album/{id}.html
  * - 播放页: /play/{id}-{sid}-{nid}.html
  * - 列表项: a.module-poster-item.module-item > .module-poster-item-title / .module-item-note / img[data-original]
  * - 选集: div.module-list.sort-list.tab-list > div.module-play-list > div.module-play-list-content > a.module-play-list-link
- * - 播放源标签: label.module-tab-name span 或 div.module-tab-item span
+ * - 播放源标签: label.module-tab-name > span (regex提取)
+ * - 播放配置: var player_aaaa = {...} JavaScript变量
+ * - 代理播放: https://v.dushe.online/?url=xxx&next=xxx&tittle=xxx&t=xxx&d=v2
  */
 public class DuShe extends Spider {
 
@@ -103,9 +105,8 @@ public class DuShe extends Spider {
 
     /**
      * 构建分类列表页URL
-     * 实际站点URL模板（12段）:
+     * 站点URL模板（12段，11个短横线）:
      * /show/{type}-{area}-{sort}-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
-     *
      * 段含义:
      * 1. type: 类型标识 (dianying/dianshiju/guochan/gangju/hanju等)
      * 2. area: 地区 (URL编码或空)
@@ -113,8 +114,10 @@ public class DuShe extends Spider {
      * 4. genre: 剧情 (URL编码或空)
      * 5. lang: 语言 (URL编码或空)
      * 6. letter: 字母 (A-Z或空)
-     * 7-10. p1-p4: 空段(预留)
-     * 11. year: 年份(数字或空)
+     * 7-8. p1-p2: 空段(预留)
+     * 9. page: 页码(第1页时空字符串)
+     * 10-11. p3-p4: 空段(预留)
+     * 12. year: 年份
      */
     private String buildCategoryUrl(String tid, String pg, Map<String, String> params) {
         int page = 1;
@@ -144,19 +147,7 @@ public class DuShe extends Spider {
             return API_HOST + "/show/" + type + "-----------.html";
         }
 
-        // 实际站点URL模板（12段，11个短横线）:
-        // /show/{type}-{area}-{sort}-{genre}-{lang}-{letter}-{p1}-{p2}-{page}-{p3}-{p4}-{year}.html
-        // 段含义:
-        // 1. type: 类型标识 (guochan/dianying/dianshiju等)
-        // 2. area: 地区 (URL编码)
-        // 3. sort: 排序 (time/hits/score)
-        // 4. genre: 剧情 (URL编码)
-        // 5. lang: 语言 (URL编码)
-        // 6. letter: 字母 (A-Z或空)
-        // 7-8. p1-p2: 空段(预留)
-        // 9. page: 页码(第1页时空字符串)
-        // 10-11. p3-p4: 空段(预留)
-        // 12. year: 年份
+        // 实际站点URL模板（12段，11个短横线）
         List<String> parts = new ArrayList<>();
         parts.add(type);                          // 1. type
         parts.add(area);                          // 2. area
@@ -170,9 +161,6 @@ public class DuShe extends Spider {
         parts.add("");                            // 10. p3 (预留)
         parts.add("");                            // 11. p4 (预留)
         parts.add(year);                          // 12. year
-
-        // 分页：页码放在第9段（index 8）
-        // (已由上面parts.add(page > 1 ? String.valueOf(page) : "")处理)
 
         // URL编码area/genre/language（如果非空）
         if (!area.isEmpty()) {
@@ -188,16 +176,12 @@ public class DuShe extends Spider {
         String urlPath = TextUtils.join("-", parts);
         return API_HOST + "/show/" + urlPath + ".html";
     }
-// ================== 列表解析 ==================
+
+    // ================== 列表解析 ==================
 
     /**
      * 解析分类列表页
-     * 实际HTML结构:
-     * div.module-items.module-poster-items-base > a.module-poster-item.module-item
-     *   > div.module-item-cover > div.module-item-note (更新状态)
-     *   > div.module-item-pic > img (封面, data-original属性)
-     *   > div.module-poster-item-info > div.module-poster-item-title (标题)
-     * href = /album/{id}.html
+     * 参考JS extractList: 使用正则匹配 module-poster-item
      */
     private JSONArray extractList(String html) throws Exception {
         JSONArray list = new JSONArray();
@@ -205,7 +189,7 @@ public class DuShe extends Spider {
 
         Document doc = Jsoup.parse(html);
 
-        // 主选择器：a.module-poster-item.module-item（实际HTML中是两个class）
+        // 主选择器：a.module-poster-item.module-item
         Elements items = doc.select("a.module-poster-item.module-item");
         if (items.isEmpty()) {
             // 兜底：选择所有带module-poster-item类的a标签
@@ -220,7 +204,7 @@ public class DuShe extends Spider {
             String href = a.attr("href");
             if (href.isEmpty()) continue;
 
-            // 只处理/album/开头的详情页链接
+            // 只处理/album/开头的详情页链接（与JS一致：!urlMatch[1].startsWith('/album/')）
             if (!href.startsWith("/album/")) continue;
 
             // 标题：优先取title属性，否则取.module-poster-item-title
@@ -257,7 +241,6 @@ public class DuShe extends Spider {
 
     /**
      * 解析搜索结果列表
-     * 搜索结果使用div.module-card-item结构
      */
     private JSONArray extractSearchList(String html) throws Exception {
         JSONArray list = new JSONArray();
@@ -339,7 +322,6 @@ public class DuShe extends Spider {
 
     /**
      * 解析页码
-     * 查找尾页链接中的页码数字
      */
     private int extractPageCount(String html) {
         if (TextUtils.isEmpty(html)) return 1;
@@ -350,7 +332,6 @@ public class DuShe extends Spider {
         Matcher lastM = lastP.matcher(html);
         if (lastM.find()) {
             String href = lastM.group(1);
-            // 从href中提取页码数字
             Matcher numM = Pattern.compile("(\\d+)\\.html").matcher(href);
             if (numM.find()) {
                 try { maxPage = Integer.parseInt(numM.group(1)); } catch (Exception ignored) {}
@@ -359,7 +340,7 @@ public class DuShe extends Spider {
 
         // 兜底：尝试匹配分页链接中的数字
         if (maxPage <= 1) {
-            Pattern pageP = Pattern.compile("page-link[^>]*>(\\d+)<");
+            Pattern pageP = Pattern.compile("page-link[^>]*>(\\d+)");
             Matcher pageM = pageP.matcher(html);
             while (pageM.find()) {
                 try {
@@ -388,14 +369,9 @@ public class DuShe extends Spider {
 
     /**
      * 解析详情页
-     * 实际HTML结构:
-     * h1 > a > 剧名
-     * div.module-item-pic > img (封面, data-original)
-     * div.module-info-tag-link > a (年份/地区/分类标签)
-     * div.module-info-item > span.module-info-item-title + div.module-info-item-content (导演/主演)
-     * div.module-info-introduction-content > p (简介)
-     * label.module-tab-name span (播放源名称)
-     * div.module-list.sort-list.tab-list > div.module-play-list > div.module-play-list-content > a.module-play-list-link (选集)
+     * 参考JS extractDetail实现:
+     * - 播放线路名称: 正则匹配 label.module-tab-name > span
+     * - 选集列表: 正则匹配 div.module-list.sort-list.tab-list 包裹的 a.module-play-list-link
      */
     private JSONObject extractDetail(String html) throws Exception {
         JSONObject info = new JSONObject();
@@ -466,36 +442,98 @@ public class DuShe extends Spider {
             else if (tname.contains("主演")) info.put("vod_actor", TextUtils.join("/", names));
         }
 
-        // 播放线路
+        // ================== 播放线路和选集（参考JS extractDetail逻辑） ==================
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
 
-        // 播放源名称：label.module-tab-name span
+        // 【关键修复1】播放源名称提取 - 参考JS正则方式
+        // JS: const fromNames = html.match(/<label class="module-tab-name">\s*<span[^>]*>([^<]+)<\/span>/g) || [];
+        // JS: const cleanFromNames = fromNames.map(x => x.replace(/<[^>]+>/g, '').trim());
         List<String> fromNames = new ArrayList<>();
-        for (Element l : doc.select("label.module-tab-name span")) fromNames.add(l.text().trim());
+        Pattern fromNameP = Pattern.compile("<label class=\"module-tab-name\">\\s*<span[^>]*>([^<]+)</span>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher fromNameM = fromNameP.matcher(html);
+        while (fromNameM.find()) {
+            fromNames.add(fromNameM.group(1).trim());
+        }
+        
+        // 如果正则没匹配到，兜底用Jsoup
+        if (fromNames.isEmpty()) {
+            for (Element l : doc.select("label.module-tab-name span")) fromNames.add(l.text().trim());
+        }
+        // 再兜底
         if (fromNames.isEmpty()) {
             for (Element l : doc.select("div.module-tab-item span")) fromNames.add(l.text().trim());
         }
 
-        // 选集列表：div.module-list.sort-list.tab-list > div.module-play-list > div.module-play-list-content > a.module-play-list-link
-        Elements panels = doc.select("div.module-list.sort-list.tab-list");
+        // 【关键修复2】选集列表提取 - 参考JS正则方式
+        // JS: const playBlocks = html.match(/<div class="module-list sort-list tab-list[^"]*" id="panel[^"]*">.*?<div class="module-play-list">.*?<div class="module-play-list-content[^"]*">(.*?)<\/div>.*?<\/div>.*?<\/div>/gs) || [];
+        Pattern playBlockP = Pattern.compile(
+            "<div class=\"module-list sort-list tab-list[^\"]*\" id=\"panel[^\"]*\">.*?<div class=\"module-play-list\">.*?<div class=\"module-play-list-content[^\"]*\">(.*?)</div>.*?</div>.*?</div>",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL
+        );
+        Matcher playBlockM = playBlockP.matcher(html);
+        
+        List<String> playBlocks = new ArrayList<>();
+        while (playBlockM.find()) {
+            playBlocks.add(playBlockM.group(1));
+        }
 
-        int idx = 0;
-        for (Element panel : panels) {
-            List<String> eps = new ArrayList<>();
-            // 选择器：a.module-play-list-link
-            for (Element a : panel.select("a.module-play-list-link")) {
-                String href = a.attr("href");
-                String epName = a.text().trim();
-                if (href.isEmpty() || epName.isEmpty()) continue;
-                eps.add(epName + "$" + fixUrl(href));
+        // 如果正则没匹配到，兜底用Jsoup
+        if (playBlocks.isEmpty()) {
+            Elements panels = doc.select("div.module-list.sort-list.tab-list");
+            for (Element panel : panels) {
+                Element contentDiv = panel.selectFirst("div.module-play-list-content");
+                if (contentDiv != null) {
+                    playBlocks.add(contentDiv.html());
+                }
             }
+        }
+
+        // 参考JS逻辑遍历播放块
+        for (int i = 0; i < playBlocks.size(); i++) {
+            List<String> eps = new ArrayList<>();
+            String blockHtml = playBlocks.get(i);
+            
+            // 参考JS: 正则匹配 a.module-play-list-link
+            // JS: const epMatches = playBlocks[i].match(/<a[^>]*class="[^\"]*module-play-list-link[^\"]*"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g) || [];
+            Pattern epP = Pattern.compile(
+                "<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>",
+                Pattern.CASE_INSENSITIVE
+            );
+            Matcher epM = epP.matcher(blockHtml);
+            while (epM.find()) {
+                String epHref = epM.group(1);
+                String epName = epM.group(2).trim();
+                if (!epHref.isEmpty() && !epName.isEmpty()) {
+                    eps.add(epName + "$" + fixUrl(epHref));
+                }
+            }
+            
+            // 兜底：如果正则没匹配到，用Jsoup
+            if (eps.isEmpty()) {
+                Elements panelElems = doc.select("div.module-list.sort-list.tab-list");
+                if (i < panelElems.size()) {
+                    Element panel = panelElems.get(i);
+                    for (Element a : panel.select("a.module-play-list-link")) {
+                        String href = a.attr("href");
+                        String epText = a.text().trim();
+                        if (!href.isEmpty() && !epText.isEmpty()) {
+                            eps.add(epText + "$" + fixUrl(href));
+                        }
+                    }
+                }
+            }
+            
             if (!eps.isEmpty()) {
-                String fromName = (idx < fromNames.size() && !fromNames.get(idx).isEmpty())
-                        ? fromNames.get(idx) : ("线路" + (idx + 1));
+                // 参考JS: 线路名取cleanFromNames[i]，没有则用"线路{i+1}"
+                String fromName;
+                if (i < fromNames.size() && !fromNames.get(i).isEmpty()) {
+                    fromName = fromNames.get(i);
+                } else {
+                    fromName = "线路" + (i + 1);
+                }
                 playFrom.add(fromName);
                 playUrl.add(TextUtils.join("#", eps));
-                idx++;
             }
         }
 
@@ -515,22 +553,29 @@ public class DuShe extends Spider {
 
     /**
      * 解析播放页获取视频URL
-     * 播放页包含:
-     * 1. var player_aaaa = {...} JavaScript变量（含url/link等）
-     * 2. iframe[src] 嵌入播放器（src指向v.dushe.online代理）
-     * 3. m3u8直链
+     * 完全参考JS extractPlayUrl逻辑:
+     * 1. 解析 var player_aaaa = {...} JavaScript变量
+     * 2. 取 data.url 作为真实视频地址
+     * 3. 通过 v.dushe.online 代理构造播放URL
+     * 4. 兜底: 解析iframe src
+     * 5. 兜底: 搜索m3u8直链
      */
     private String extractPlayUrl(String html) {
-        if (html.isEmpty()) return null;
+        if (TextUtils.isEmpty(html)) return null;
 
-        // 1. 解析player_aaaa变量
+        // 1. 解析player_aaaa变量（参考JS正则）
+        // JS: /var\s+player_aaaa\s*=\s*({[^;]+})/
         Matcher pm = Pattern.compile("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+})").matcher(html);
         if (pm.find()) {
             try {
                 String objStr = pm.group(1);
+                // 参考JS: 给对象属性名加引号
                 objStr = objStr.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                // 参考JS: 单引号转双引号
                 objStr = objStr.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                // 参考JS: 转义斜杠转正常斜杠
                 objStr = objStr.replace("\\/", "/");
+                // 参考JS: 去除尾逗号
                 objStr = objStr.replaceAll(",\\s*}", "}");
 
                 JSONObject data = new JSONObject(objStr);
@@ -542,16 +587,21 @@ public class DuShe extends Spider {
                     JSONObject vodData = data.optJSONObject("vod_data");
                     if (vodData != null) title = vodData.optString("vod_name", "");
 
+                    // 参考JS: 构造代理URL
+                    // JS: ${PROXY_HOST}/?url=xxx&next=xxx&tittle=xxx&t=xxx&d=v2
                     return PROXY_HOST + "/?url=" + URLEncoder.encode(videoUrl, "UTF-8")
                             + "&next=" + URLEncoder.encode(fixUrl(nextUrl), "UTF-8")
                             + "&tittle=" + URLEncoder.encode(title, "UTF-8")
                             + "&t=" + URLEncoder.encode(from, "UTF-8")
                             + "&d=v2";
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                // 参考JS: console.log('player_aaaa parse error:', e.message);
+            }
         }
 
-        // 2. 解析iframe
+        // 2. 直接提取iframe（参考JS逻辑）
+        // JS: /<iframe[^>]*src="([^"]+)"/ 
         Matcher ifM = Pattern.compile("<iframe[^>]*src=\"([^\"]+)\"").matcher(html);
         if (ifM.find()) {
             String src = ifM.group(1);
@@ -566,7 +616,8 @@ public class DuShe extends Spider {
             return fixUrl(src);
         }
 
-        // 3. 解析m3u8直链
+        // 3. 直接搜索m3u8直链（参考JS逻辑）
+        // JS: /(https?:\/\/[^\s<>"']+\.m3u8[^\s<>"']*)/
         Matcher m3u8M = Pattern.compile("(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)").matcher(html);
         if (m3u8M.find()) return cleanUrl(m3u8M.group(1));
 
@@ -727,111 +778,4 @@ public class DuShe extends Spider {
             int pagecount = extractPageCount(html);
 
             JSONObject result = new JSONObject();
-            result.put("page", page);
-            result.put("list", list);
-            result.put("pagecount", pagecount > 0 ? pagecount : 1);
-            result.put("limit", 24);
-            result.put("total", (pagecount > 0 ? pagecount : 1) * 24);
-            return result.toString();
-        } catch (Exception e) {
-            JSONObject result = new JSONObject();
-            result.put("page", 1);
-            result.put("list", new JSONArray());
-            result.put("pagecount", 1);
-            result.put("limit", 24);
-            result.put("total", 0);
-            return result.toString();
-        }
-    }
-
-    @Override
-    public String detailContent(List<String> ids) throws Exception {
-        try {
-            String id = ids.get(0);
-            String url = id.startsWith("http") ? id : API_HOST + id;
-            String html = fetchHtml(url);
-            if (html.isEmpty()) {
-                JSONObject r = new JSONObject();
-                r.put("list", new JSONArray());
-                return r.toString();
-            }
-            JSONObject info = extractDetail(html);
-            info.put("vod_id", id);
-            JSONArray arr = new JSONArray();
-            arr.put(info);
-            JSONObject result = new JSONObject();
-            result.put("list", arr);
-            return result.toString();
-        } catch (Exception e) {
-            JSONObject r = new JSONObject();
-            r.put("list", new JSONArray());
-            return r.toString();
-        }
-    }
-
-    @Override
-    public String searchContent(String key, boolean quick) throws Exception {
-        try {
-            String encoded = URLEncoder.encode(key, "UTF-8");
-            String url = API_HOST + "/search/" + encoded + "-------------.html";
-            String html = fetchHtml(url);
-            JSONArray list = extractSearchList(html);
-            JSONObject result = new JSONObject();
-            result.put("list", list);
-            result.put("page", 1);
-            result.put("pagecount", 1);
-            return result.toString();
-        } catch (Exception e) {
-            JSONObject r = new JSONObject();
-            r.put("list", new JSONArray());
-            return r.toString();
-        }
-    }
-
-    @Override
-    public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        JSONObject result = new JSONObject();
-
-        if (id != null && id.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
-            result.put("parse", 0);
-            result.put("url", id);
-                        result.put("header", headerToJson(getM3u8Header()));
-            return result.toString();
-        }
-
-        String html = fetchHtml(id);
-        if (html.isEmpty()) {
-            result.put("parse", 1);
-            result.put("url", id);
-            result.put("header", headerToJson(getHeader()));
-            return result.toString();
-        }
-
-        String playUrl = extractPlayUrl(html);
-        if (playUrl != null && !playUrl.isEmpty()) {
-            if (playUrl.contains("v.dushe.online")) {
-                Map<String, String> h = getHeader();
-                h.put("Referer", API_HOST + "/");
-                result.put("parse", 1);
-                result.put("url", playUrl);
-                result.put("header", headerToJson(h));
-                return result.toString();
-            }
-            if (playUrl.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
-                result.put("parse", 0);
-                result.put("url", playUrl);
-                result.put("header", headerToJson(getM3u8Header()));
-                return result.toString();
-            }
-            result.put("parse", 1);
-            result.put("url", playUrl);
-            result.put("header", headerToJson(getHeader()));
-            return result.toString();
-        }
-
-        result.put("parse", 1);
-        result.put("url", id);
-        result.put("header", headerToJson(getHeader()));
-        return result.toString();
-    }
-}
+            result.put("page",
