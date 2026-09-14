@@ -795,4 +795,43 @@ public class DuShe extends Spider {
         if (id != null && id.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
             result.put("parse", 0);
             result.put("url", id);
-            result.put("h
+                        result.put("header", headerToJson(getM3u8Header()));
+            return result.toString();
+        }
+
+        String html = fetchHtml(id);
+        if (html.isEmpty()) {
+            result.put("parse", 1);
+            result.put("url", id);
+            result.put("header", headerToJson(getHeader()));
+            return result.toString();
+        }
+
+        String playUrl = extractPlayUrl(html);
+        if (playUrl != null && !playUrl.isEmpty()) {
+            if (playUrl.contains("v.dushe.online")) {
+                Map<String, String> h = getHeader();
+                h.put("Referer", API_HOST + "/");
+                result.put("parse", 1);
+                result.put("url", playUrl);
+                result.put("header", headerToJson(h));
+                return result.toString();
+            }
+            if (playUrl.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
+                result.put("parse", 0);
+                result.put("url", playUrl);
+                result.put("header", headerToJson(getM3u8Header()));
+                return result.toString();
+            }
+            result.put("parse", 1);
+            result.put("url", playUrl);
+            result.put("header", headerToJson(getHeader()));
+            return result.toString();
+        }
+
+        result.put("parse", 1);
+        result.put("url", id);
+        result.put("header", headerToJson(getHeader()));
+        return result.toString();
+    }
+}
