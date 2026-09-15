@@ -47,18 +47,13 @@ public class DuShe extends Spider {
     }
 
     /**
-     * m3u8 源的 header，Referer 用源自己的域名
+     * m3u8 源的 header，Referer 用主站（QPython 实测通过）
      */
     private Map<String, String> getM3U8Header(String m3u8Url) {
         Map<String, String> header = new HashMap<>();
         header.put("User-Agent", UA);
         header.put("Accept", "*/*");
-        try {
-            java.net.URL u = new java.net.URL(m3u8Url);
-            header.put("Referer", u.getProtocol() + "://" + u.getHost() + "/");
-        } catch (Exception e) {
-            header.put("Referer", API_HOST + "/");
-        }
+        header.put("Referer", API_HOST + "/");
         return header;
     }
 
