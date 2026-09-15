@@ -151,27 +151,23 @@ public class WangWang extends Spider {
     private JSONObject buildFilters() throws Exception {
         JSONObject filters = new JSONObject();
 
-        // 地区
         JSONArray areaValues = new JSONArray();
         areaValues.put(filterValue("全部", ""));
         String[] areas = {"大陆", "香港", "台湾", "美国", "韩国", "日本", "泰国",
                 "新加坡", "马来西亚", "印度", "英国", "法国", "加拿大", "西班牙", "俄罗斯", "其它"};
         for (String a : areas) areaValues.put(filterValue(a, a));
 
-        // 年份
         JSONArray yearValues = new JSONArray();
         yearValues.put(filterValue("全部", ""));
         for (int y = 2026; y >= 1900; y--) {
             yearValues.put(filterValue(String.valueOf(y), String.valueOf(y)));
         }
 
-        // 排序
         JSONArray sortValues = new JSONArray();
         sortValues.put(filterValue("全部", "time"));
         sortValues.put(filterValue("人气", "hits"));
         sortValues.put(filterValue("评分", "score"));
 
-        // 电影分类
         JSONArray movieClass = new JSONArray();
         movieClass.put(filterValue("全部", ""));
         movieClass.put(filterValue("动作片", "5"));
@@ -184,7 +180,6 @@ public class WangWang extends Spider {
         movieClass.put(filterValue("惊悚片", "16"));
         movieClass.put(filterValue("奇幻片", "17"));
 
-        // 连续剧分类
         JSONArray tvClass = new JSONArray();
         tvClass.put(filterValue("全部", ""));
         tvClass.put(filterValue("国产剧", "12"));
@@ -192,20 +187,16 @@ public class WangWang extends Spider {
         tvClass.put(filterValue("日韩剧", "14"));
         tvClass.put(filterValue("欧美剧", "15"));
 
-        // 综艺
         JSONArray varietyClass = new JSONArray();
         varietyClass.put(filterValue("全部", ""));
 
-        // 动漫
         JSONArray animeClass = new JSONArray();
         animeClass.put(filterValue("全部", ""));
         animeClass.put(filterValue("动漫剧", "18"));
 
-        // 短剧
         JSONArray shortClass = new JSONArray();
         shortClass.put(filterValue("全部", ""));
 
-        // 组装
         JSONArray movieFilters = new JSONArray();
         movieFilters.put(filterGroup("id", "类型", movieClass));
         movieFilters.put(filterGroup("area", "地区", areaValues));
@@ -295,7 +286,7 @@ public class WangWang extends Spider {
     }
 
     // ============================================================
-    // searchContent（POST）
+    // searchContent
     // ============================================================
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
@@ -357,7 +348,7 @@ public class WangWang extends Spider {
     }
 
     // ============================================================
-    // detailContent（抓 mac_from / mac_url）
+    // detailContent
     // ============================================================
     @Override
     public String detailContent(List<String> ids) throws Exception {
@@ -427,7 +418,7 @@ public class WangWang extends Spider {
     }
 
     // ============================================================
-    // playerContent（mac_url 自定义 base64 解码）
+    // playerContent
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -435,6 +426,7 @@ public class WangWang extends Spider {
             int parse = 0;
 
             String decoded = decodeMacUrl(id);
+            SpiderDebug.log("play decoded=" + decoded);
 
             if (TextUtils.isEmpty(decoded) || !decoded.startsWith("http")) {
                 String proxyApi = "https://api.nmvod.me:520/player/?url=";
@@ -467,7 +459,7 @@ public class WangWang extends Spider {
     }
 
     // ============================================================
-    // 自定义 base64 解码
+    // ★ 自定义 base64 解码（对齐 JS Crypto.enc.Base64.parse）
     // ============================================================
     private String decodeMacUrl(String n) {
         try {
@@ -478,15 +470,25 @@ public class WangWang extends Spider {
             String e = n.substring(0, 66);
             String t = n.substring(66);
 
+            // 前 66 字符隔位取
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < e.length(); i += 2) {
                 sb.append(e.charAt(i));
             }
 
+            // 剩余部分替换自定义 token
             String a = sb.toString()
                     + t.replace("O0O0O", "=")
                        .replace("oo00o", "/")
                        .replace("o000o", "+");
+
+            // ★ 清理非 base64 字符（JS parse 会忽略）
+            a = a.replaceAll("[^A-Za-z0-9+/=]", "");
+
+            // ★ 补 padding 到 4 的倍数（JS parse 会自动补）
+            int mod = a.length() % 4;
+            if (mod == 2) a += "==";
+            else if (mod == 3) a += "=";
 
             byte[] bytes = Base64.decode(a, Base64.DEFAULT);
             return new String(bytes, "UTF-8");
