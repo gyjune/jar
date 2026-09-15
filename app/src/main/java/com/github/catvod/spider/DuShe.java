@@ -26,6 +26,8 @@ public class DuShe extends Spider {
     private static final String siteUrl = "https://www.dushehub.com";
     private static final String playProxy = "https://v.dushe.online";
 
+    private static final Pattern playerPattern = Pattern.compile(
+            "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
     private static final Pattern directVideoPattern = Pattern.compile(
             "\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?|$)", Pattern.CASE_INSENSITIVE);
     private static final Pattern lineIdPattern = Pattern.compile(
@@ -290,7 +292,7 @@ public class DuShe extends Spider {
         }
         SpiderDebug.log("contentLineIds=" + contentLineIds);
 
-        // ========== 3. 按位置对齐：tab[i] 对应 content[i] ==========
+        // ========== 3. 按位置对齐 ==========
         StringBuilder playFrom = new StringBuilder();
         StringBuilder playUrl = new StringBuilder();
         int n = Math.min(tabNames.size(), contentUrls.size());
@@ -306,7 +308,6 @@ public class DuShe extends Spider {
             if (playUrl.length() > 0) playUrl.append("$$$");
             playUrl.append(contentUrls.get(i));
         }
-        // 选集块比 tab 多时，多余用「线路N」补
         for (int i = n; i < contentUrls.size(); i++) {
             if (playFrom.length() > 0) playFrom.append("$$$");
             playFrom.append("线路" + contentLineIds.get(i));
@@ -330,7 +331,7 @@ public class DuShe extends Spider {
     // ============================================================
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
-        String url = siteUrl + "/search/" + URLEncoder.encode(key, "UTF-8") + "-------------.html";
+        String url = siteUrl + "/search/" + encode(key) + "-------------.html";
         SpiderDebug.log("search url: " + url);
 
         String html = OkHttp.string(url);
@@ -371,7 +372,7 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // 播放：只抠 iframe 的 src
+    // 播放：先自己拼 player_aaaa，拼不出来才抠 iframe
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -392,37 +393,81 @@ public class DuShe extends Spider {
             return result.toString();
         }
 
-        // 3. 抠 iframe
+        // 3. 提取播放地址
         String playUrl = extractPlayUrl(html);
         SpiderDebug.log("play extracted=" + playUrl);
 
-        if (!TextUtils.isEmpty(playUrl)) {
+        // 4. 是代理地址 → parse=1
+        if (!TextUtils.isEmpty(playUrl) && playUrl.contains("v.dushe.online")) {
             result.put("parse", 1);
             result.put("url", playUrl);
             JSONObject headers = new JSONObject();
             headers.put("Referer", siteUrl + "/");
             headers.put("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
             result.put("header", headers.toString());
-        } else {
+        }
+        // 5. 是直链 → parse=0
+        else if (!TextUtils.isEmpty(playUrl) && directVideoPattern.matcher(playUrl).find()) {
+            result.put("parse", 0);
+            result.put("url", playUrl);
+        }
+        // 6. 其它 → parse=1 兜底
+        else {
             result.put("parse", 1);
-            result.put("url", id);
+            result.put("url", playUrl != null ? playUrl : id);
         }
 
         return result.toString();
     }
 
     // ============================================================
-    // 抠 iframe：只要 src 含 v.dushe.online
+    // 提取播放地址：先自己拼，再抠 iframe
     // ============================================================
     private String extractPlayUrl(String html) {
         try {
+            // ① 主力：自己拼 player_aaaa（和 JS 版一致）
+            Matcher matcher = playerPattern.matcher(html);
+            if (matcher.find()) {
+                String raw = matcher.group(1);
+                // 修成合法 JSON
+                raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                raw = raw.replace("\\/", "/");
+                raw = raw.replaceAll(",\\s*}", "}");
+
+                JSONObject p = new JSONObject(raw);
+                String url = p.optString("url", "");
+                // ★ 关键：next 用 link_next
+                String next = p.optString("link_next", "");
+                if (!TextUtils.isEmpty(next) && next.startsWith("/")) {
+                    next = siteUrl + next;
+                }
+                String from = p.optString("from", "");
+                String title = "";
+                JSONObject vd = p.optJSONObject("vod_data");
+                if (vd != null) title = vd.optString("vod_name", "");
+
+                SpiderDebug.log("player_aaaa url=" + url + " next=" + next
+                        + " from=" + from + " title=" + title);
+
+                if (!TextUtils.isEmpty(url)) {
+                    String finalUrl = playProxy + "/?url=" + encode(url)
+                            + "&next=" + encode(next)
+                            + "&tittle=" + encode(title)
+                            + "&t=" + encode(from)
+                            + "&d=v2";
+                    SpiderDebug.log("proxy final=" + finalUrl);
+                    return finalUrl;
+                }
+            }
+
+            // ② 兜底：抠 iframe
             Document doc = Jsoup.parse(html);
-            Elements iframes = doc.select("iframe");
-            for (Element iframe : iframes) {
+            for (Element iframe : doc.select("iframe")) {
                 String src = iframe.attr("src");
                 if (TextUtils.isEmpty(src)) src = iframe.attr("data-src");
                 if (!TextUtils.isEmpty(src) && src.contains("v.dushe.online")) {
-                    SpiderDebug.log("iframe direct=" + src);
+                    SpiderDebug.log("iframe fallback=" + src);
                     return src;
                 }
             }
@@ -560,6 +605,19 @@ public class DuShe extends Spider {
         if (url.startsWith("http")) return url;
         if (url.startsWith("/")) return siteUrl + url;
         return siteUrl + "/" + url;
+    }
+
+    // 和 JS encodeURIComponent 行为一致
+    private String encode(String s) {
+        if (s == null) return "";
+        try {
+            return URLEncoder.encode(s, "UTF-8")
+                    .replace("+", "%20")
+                    .replace("*", "%2A")
+                    .replace("%7E", "~");
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     private int parseIntSafe(String s, int def) {
