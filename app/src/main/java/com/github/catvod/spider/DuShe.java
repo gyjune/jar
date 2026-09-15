@@ -22,13 +22,13 @@ import java.util.regex.Pattern;
  */
 public class DuShe extends Spider {
     private static final String API_HOST = "https://www.dushehub.com";
-    private static final String UA = "Mozilla/5.0 (Linux; Android 14; SM‑G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+    private static final String UA = "Mozilla/5.0 (Linux; Android 14; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
 
     private Map<String, String> getHeader() {
         Map<String, String> header = new HashMap<>();
-        header.put("User‑Agent", UA);
+        header.put("User-Agent", UA);
         header.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        header.put("Accept‑Language", "zh‑CN,zh;q=0.9");
+        header.put("Accept-Language", "zh-CN,zh;q=0.9");
         header.put("Referer", API_HOST + "/");
         return header;
     }
@@ -61,7 +61,7 @@ public class DuShe extends Spider {
     private String encode(String s) {
         if (s == null) return "";
         try {
-            return URLEncoder.encode(s, "UTF‑8");
+            return URLEncoder.encode(s, "UTF-8");
         } catch (Exception e) {
             return s;
         }
@@ -94,7 +94,7 @@ public class DuShe extends Spider {
     private JSONArray extractList(String html) throws Exception {
         JSONArray videos = new JSONArray();
         if (html == null || html.isEmpty()) return videos;
-        Pattern p = Pattern.compile("<a[^>]*class=\"[^\"]*module‑poster‑item[^\"]*\"[^>]*>.*?</a>\\s*</div>", Pattern.DOTALL);
+        Pattern p = Pattern.compile("<a[^>]*class=\"[^\"]*module-poster-item[^\"]*\"[^>]*>.*?</a>\\s*</div>", Pattern.DOTALL);
         Matcher m = p.matcher(html);
         while (m.find()) {
             String item = m.group();
@@ -102,10 +102,10 @@ public class DuShe extends Spider {
             if (!urlMatch.find()) continue;
             String vodId = urlMatch.group(1);
             if (!vodId.startsWith("/album/")) continue;
-            Matcher titleMatch = Pattern.compile("<div[^>]*class=\"[^\"]*module‑poster‑item‑title[^\"]*\"[^>]*>([^<]+)</div>").matcher(item);
+            Matcher titleMatch = Pattern.compile("<div[^>]*class=\"[^\"]*module-poster-item-title[^\"]*\"[^>]*>([^<]+)</div>").matcher(item);
             if (!titleMatch.find()) continue;
             String name = titleMatch.group(1).trim();
-            Matcher picMatch = Pattern.compile("data‑original=\"([^\"]+)\"").matcher(item);
+            Matcher picMatch = Pattern.compile("data-original=\"([^\"]+)\"").matcher(item);
             String pic = picMatch.find() ? fixUrl(picMatch.group(1)) : "";
             JSONObject vod = new JSONObject();
             vod.put("vod_id", vodId);
@@ -119,7 +119,7 @@ public class DuShe extends Spider {
     private JSONArray extractSearchList(String html) throws Exception {
         JSONArray videos = new JSONArray();
         if (html == null || html.isEmpty()) return videos;
-        Pattern p = Pattern.compile("<div class=\"module‑card‑item module‑item\">.*?</div>\\s*</div>\\s*</div>", Pattern.DOTALL);
+        Pattern p = Pattern.compile("<div class=\"module-card-item module-item\">.*?</div>\\s*</div>\\s*</div>", Pattern.DOTALL);
         Matcher m = p.matcher(html);
         while (m.find()) {
             String item = m.group();
@@ -127,17 +127,17 @@ public class DuShe extends Spider {
             if (!urlMatch.find()) continue;
             String vodId = urlMatch.group(1);
             String title = "";
-            Matcher tm1 = Pattern.compile("<div[^>]*class=\"[^\"]*module‑card‑item‑title[^\"]*\"[^>]*>.*?<strong>([^<]+)</strong>.*?</a>", Pattern.DOTALL).matcher(item);
+            Matcher tm1 = Pattern.compile("<div[^>]*class=\"[^\"]*module-card-item-title[^\"]*\"[^>]*>.*?<strong>([^<]+)</strong>.*?</a>", Pattern.DOTALL).matcher(item);
             if (tm1.find()) {
                 title = tm1.group(1).trim();
             } else {
-                Matcher tm2 = Pattern.compile("<div[^>]*class=\"[^\"]*module‑card‑item‑title[^\"]*\"[^>]*>.*?<a[^>]*>([^<]+)</a>", Pattern.DOTALL).matcher(item);
+                Matcher tm2 = Pattern.compile("<div[^>]*class=\"[^\"]*module-card-item-title[^\"]*\"[^>]*>.*?<a[^>]*>([^<]+)</a>", Pattern.DOTALL).matcher(item);
                 if (tm2.find()) title = tm2.group(1).trim();
             }
             if (title.isEmpty()) continue;
-            Matcher classMatch = Pattern.compile("<div class=\"module‑card‑item‑class\">([^<]+)</div>").matcher(item);
+            Matcher classMatch = Pattern.compile("<div class=\"module-card-item-class\">([^<]+)</div>").matcher(item);
             String category = classMatch.find() ? classMatch.group(1).trim() : "";
-            Matcher picMatch = Pattern.compile("data‑original=\"([^\"]+)\"").matcher(item);
+            Matcher picMatch = Pattern.compile("data-original=\"([^\"]+)\"").matcher(item);
             String pic = picMatch.find() ? fixUrl(picMatch.group(1)) : "";
             JSONObject vod = new JSONObject();
             vod.put("vod_id", vodId);
@@ -152,7 +152,7 @@ public class DuShe extends Spider {
     private int extractPageCount(String html) {
         int maxPage = 1;
         if (html == null) return maxPage;
-        Pattern p = Pattern.compile("<a[^>]*class=\"[^\"]*page‑link[^\"]*page‑number[^\"]*\"[^>]*>(\\d+)</a>");
+        Pattern p = Pattern.compile("<a[^>]*class=\"[^\"]*page-link[^\"]*page-number[^\"]*\"[^>]*>(\\d+)</a>");
         Matcher m = p.matcher(html);
         while (m.find()) {
             try {
@@ -190,11 +190,11 @@ public class DuShe extends Spider {
 
         String title = find("<h1>([^<]+)</h1>", html);
         if (!title.isEmpty()) info.put("vod_name", title);
-        String pic = find("<div class=\"module‑item‑pic\">\\s*<img[^>]*data‑original=\"([^\"]+)\"", html);
+        String pic = find("<div class=\"module-item-pic\">\\s*<img[^>]*data-original=\"([^\"]+)\"", html);
         if (!pic.isEmpty()) info.put("vod_pic", fixUrl(pic));
 
         List<String> tags = new ArrayList<>();
-        Matcher tm = Pattern.compile("<div class=\"module‑info‑tag‑link\">\\s*<a[^>]*>([^<]+)</a>\\s*</div>").matcher(html);
+        Matcher tm = Pattern.compile("<div class=\"module-info-tag-link\">\\s*<a[^>]*>([^<]+)</a>\\s*</div>").matcher(html);
         while (tm.find()) tags.add(tm.group(1).trim());
 
         List<String> areas = Arrays.asList("中国大陆", "中国香港", "中国台湾", "美国", "韩国", "日本", "英国", "法国", "泰国");
@@ -211,10 +211,10 @@ public class DuShe extends Spider {
         }
         info.put("vod_class", classSb.toString());
 
-        String desc = find("<div class=\"module‑info‑introduction‑content\">\\s*<p>([^<]+)</p>", html);
+        String desc = find("<div class=\"module-info-introduction-content\">\\s*<p>([^<]+)</p>", html);
         if (!desc.isEmpty()) info.put("vod_content", desc);
 
-        String directorBlock = find("<span class=\"module‑info‑item‑title\">导演：</span>\\s*<div class=\"module‑info‑item‑content\">\\s*(.*?)</div>", html);
+        String directorBlock = find("<span class=\"module-info-item-title\">导演：</span>\\s*<div class=\"module-info-item-content\">\\s*(.*?)</div>", html);
         if (!directorBlock.isEmpty()) {
             List<String> dirs = new ArrayList<>();
             Matcher dm = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(directorBlock);
@@ -222,7 +222,7 @@ public class DuShe extends Spider {
             info.put("vod_director", TextUtils.join("/", dirs));
         }
 
-        String actorBlock = find("<span class=\"module‑info‑item‑title\">主演：</span>\\s*<div class=\"module‑info‑item‑content\">\\s*(.*?)</div>", html);
+        String actorBlock = find("<span class=\"module-info-item-title\">主演：</span>\\s*<div class=\"module-info-item-content\">\\s*(.*?)</div>", html);
         if (!actorBlock.isEmpty()) {
             List<String> actors = new ArrayList<>();
             Matcher am = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(actorBlock);
@@ -233,12 +233,12 @@ public class DuShe extends Spider {
         List<String> playFromList = new ArrayList<>();
         List<String> playUrlList = new ArrayList<>();
 
-        Pattern playBlockPat = Pattern.compile("<div class=\"module‑list sort‑list tab‑list[^\"]*\" id=\"panel[^\"]*\">\\s*<div class=\"module‑play‑list\">\\s*<div class=\"module‑play‑list‑content[^\"]*\">(.*?)</div>\\s*</div>\\s*</div>", Pattern.DOTALL);
+        Pattern playBlockPat = Pattern.compile("<div class=\"module-list sort-list tab-list[^\"]*\" id=\"panel[^\"]*\">\\s*<div class=\"module-play-list\">\\s*<div class=\"module-play-list-content[^\"]*\">(.*?)</div>\\s*</div>\\s*</div>", Pattern.DOTALL);
         Matcher playBlockMatcher = playBlockPat.matcher(html);
         List<String> blockList = new ArrayList<>();
         while (playBlockMatcher.find()) blockList.add(playBlockMatcher.group(1));
 
-        Pattern fromNamePat = Pattern.compile("<label class=\"module‑tab‑name\">\\s*<span[^>]*>([^<]+)</span>");
+        Pattern fromNamePat = Pattern.compile("<label class=\"module-tab-name\">\\s*<span[^>]*>([^<]+)</span>");
         Matcher fromNameMatcher = fromNamePat.matcher(html);
         List<String> fromNameList = new ArrayList<>();
         while (fromNameMatcher.find()) fromNameList.add(fromNameMatcher.group(1).trim());
@@ -246,7 +246,7 @@ public class DuShe extends Spider {
         for (int i = 0; i < blockList.size(); i++) {
             String blk = blockList.get(i);
             List<String> eps = new ArrayList<>();
-            Matcher epMatcher = Pattern.compile("<a[^>]*class=\"[^\"]*module‑play‑list‑link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>").matcher(blk);
+            Matcher epMatcher = Pattern.compile("<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>").matcher(blk);
             while (epMatcher.find()) {
                 String epName = epMatcher.group(2).trim();
                 String epHref = fixUrl(epMatcher.group(1));
@@ -285,9 +285,14 @@ public class DuShe extends Spider {
     @Override
     public String homeVideoContent() throws Exception {
         String html = req(API_HOST + "/");
-        JSONArray list = extractList(html);
+        JSONArray all = extractList(html);
+        JSONArray list = new JSONArray();
+        int take = Math.min(all.length(), 12);
+        for(int i=0;i<take;i++){
+            list.put(all.getJSONObject(i));
+        }
         JSONObject res = new JSONObject();
-        res.put("list", list.length() > 12 ? list.slice(0,12) : list);
+        res.put("list", list);
         return res.toString();
     }
 
