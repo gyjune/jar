@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 /**
  * 毒舌电影 - www.dushehub.com
  * 结构参考 Dm84
+ * header 用 JSONObject 对象
  */
 public class DuShe extends Spider {
 
@@ -67,6 +68,19 @@ public class DuShe extends Spider {
         url = url.replaceAll("^[\"']|[\"']$", "").trim();
         if (url.startsWith("//")) url = "https:" + url;
         return url;
+    }
+
+    // ★ header 返回 JSONObject（对象）
+    private JSONObject headerJson() {
+        JSONObject h = new JSONObject();
+        try {
+            h.put("User-Agent", userAgent);
+            h.put("Referer", siteUrl + "/");
+            h.put("Accept", "*/*");
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+        }
+        return h;
     }
 
     // ============================================================
@@ -235,42 +249,53 @@ public class DuShe extends Spider {
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
                                   HashMap<String, String> extend) throws Exception {
-        String area = extend.get("area") == null ? "" : extend.get("area");
-        String year = extend.get("year") == null ? "" : extend.get("year");
-        String classType = extend.get("class") == null ? "" : extend.get("class");
-        String sort = extend.get("sort") == null ? "" : extend.get("sort");
+        try {
+            String area = extend.get("area") == null ? "" : extend.get("area");
+            String year = extend.get("year") == null ? "" : extend.get("year");
+            String classType = extend.get("class") == null ? "" : extend.get("class");
+            String sort = extend.get("sort") == null ? "" : extend.get("sort");
 
-        if ("全部".equals(area)) area = "";
-        if ("全部".equals(year)) year = "";
-        if ("全部".equals(classType)) classType = "";
-        if ("全部".equals(sort)) sort = "";
+            if ("全部".equals(area)) area = "";
+            if ("全部".equals(year)) year = "";
+            if ("全部".equals(classType)) classType = "";
+            if ("全部".equals(sort)) sort = "";
 
-        // 12 段，11 个 '-'
-        // [0]tid [1]area [2]sort [3]class [4-7]空 [8]page [9-10]空 [11]year
-        String[] parts = new String[12];
-        Arrays.fill(parts, "");
-        parts[0] = tid;
-        parts[1] = area;
-        parts[2] = sort;
-        parts[3] = classType;
-        parts[11] = year;
-        if (!"1".equals(pg) && !TextUtils.isEmpty(pg)) {
-            parts[8] = pg;
+            // 12 段，11 个 '-'
+            // [0]tid [1]area [2]sort [3]class [4-7]空 [8]page [9-10]空 [11]year
+            String[] parts = new String[12];
+            Arrays.fill(parts, "");
+            parts[0] = tid;
+            parts[1] = area;
+            parts[2] = sort;
+            parts[3] = classType;
+            parts[11] = year;
+            if (!"1".equals(pg) && !TextUtils.isEmpty(pg)) {
+                parts[8] = pg;
+            }
+
+            String cateUrl = siteUrl + "/show/" + TextUtils.join("-", parts) + ".html";
+            SpiderDebug.log("category url: " + cateUrl);
+
+            JSONArray videos = parseVodList(cateUrl);
+            int page = Integer.parseInt(pg);
+
+            JSONObject result = new JSONObject();
+            result.put("page", page);
+            result.put("pagecount", page + 1);
+            result.put("limit", 36);
+            result.put("total", Integer.MAX_VALUE);
+            result.put("list", videos);
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+            JSONObject result = new JSONObject();
+            result.put("page", parseIntSafe(pg, 1));
+            result.put("list", new JSONArray());
+            result.put("pagecount", 1);
+            result.put("limit", 36);
+            result.put("total", 0);
+            return result.toString();
         }
-
-        String cateUrl = siteUrl + "/show/" + TextUtils.join("-", parts) + ".html";
-        SpiderDebug.log("category url: " + cateUrl);
-
-        JSONArray videos = parseVodList(cateUrl);
-        int page = Integer.parseInt(pg);
-
-        JSONObject result = new JSONObject();
-        result.put("page", page);
-        result.put("pagecount", page + 1);
-        result.put("limit", 36);
-        result.put("total", Integer.MAX_VALUE);
-        result.put("list", videos);
-        return result.toString();
     }
 
     // ============================================================
@@ -384,81 +409,75 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // 播放：抓 player_aaaa.url → parse:0
+    // 播放：抓 player_aaaa.url → parse:0，header 用对象
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        // 1. id 是直链
-        if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
-                Pattern.CASE_INSENSITIVE).matcher(id).find()) {
-            JSONObject result = new JSONObject();
-            result.put("parse", 0);
-            result.put("url", id);
-            result.put("header", headerJson());
-            return result.toString();
-        }
+        try {
+            if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
+                    Pattern.CASE_INSENSITIVE).matcher(id).find()) {
+                JSONObject result = new JSONObject();
+                result.put("parse", 0);
+                result.put("url", id);
+                result.put("header", headerJson());   // ★ 对象
+                return result.toString();
+            }
 
-        // 2. 抓播放页
-        String html = req(id);
-        if (TextUtils.isEmpty(html)) {
+            String html = req(id);
+            if (TextUtils.isEmpty(html)) {
+                JSONObject result = new JSONObject();
+                result.put("parse", 1);
+                result.put("url", id);
+                result.put("header", headerJson());   // ★ 对象
+                return result.toString();
+            }
+
+            Matcher pm = Pattern.compile("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})").matcher(html);
+            if (pm.find()) {
+                try {
+                    String raw = pm.group(1);
+                    raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                    raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                    raw = raw.replace("\\/", "/");
+                    raw = raw.replaceAll(",\\s*}", "}");
+                    JSONObject p = new JSONObject(raw);
+                    String url = p.optString("url", "");
+                    if (!TextUtils.isEmpty(url)) {
+                        SpiderDebug.log("player_aaaa url=" + url);
+                        JSONObject result = new JSONObject();
+                        result.put("parse", 0);
+                        result.put("url", cleanUrl(url));
+                        result.put("header", headerJson());   // ★ 对象
+                        return result.toString();
+                    }
+                } catch (Exception e) {
+                    SpiderDebug.log("player_aaaa parse error");
+                }
+            }
+
+            Matcher mm = Pattern.compile("(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)").matcher(html);
+            if (mm.find()) {
+                JSONObject result = new JSONObject();
+                result.put("parse", 0);
+                result.put("url", cleanUrl(mm.group(1)));
+                result.put("header", headerJson());   // ★ 对象
+                return result.toString();
+            }
+
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            result.put("header", headerJson());
+            result.put("header", headerJson());   // ★ 对象
             return result.toString();
-        }
-
-        // 3. player_aaaa
-        Matcher pm = Pattern.compile("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})").matcher(html);
-        if (pm.find()) {
-            try {
-                String raw = pm.group(1);
-                raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
-                raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
-                raw = raw.replace("\\/", "/");
-                raw = raw.replaceAll(",\\s*}", "}");
-                JSONObject p = new JSONObject(raw);
-                String url = p.optString("url", "");
-                if (!TextUtils.isEmpty(url)) {
-                    SpiderDebug.log("player_aaaa url=" + url);
-                    JSONObject result = new JSONObject();
-                    result.put("parse", 0);
-                    result.put("url", cleanUrl(url));
-                    result.put("header", headerJson());
-                    return result.toString();
-                }
-            } catch (Exception e) {
-                SpiderDebug.log("player_aaaa parse error");
-            }
-        }
-
-        // 4. 兜底：正则匹配 m3u8
-        Matcher mm = Pattern.compile("(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)").matcher(html);
-        if (mm.find()) {
-            JSONObject result = new JSONObject();
-            result.put("parse", 0);
-            result.put("url", cleanUrl(mm.group(1)));
-            result.put("header", headerJson());
-            return result.toString();
-        }
-
-        // 5. 最终兜底
-        JSONObject result = new JSONObject();
-        result.put("parse", 1);
-        result.put("url", id);
-        result.put("header", headerJson());
-        return result.toString();
-    }
-
-    private String headerJson() {
-        try {
-            JSONObject h = new JSONObject();
-            h.put("User-Agent", userAgent);
-            h.put("Referer", siteUrl + "/");
-            h.put("Accept", "*/*");
-            return h.toString();
         } catch (Exception e) {
-            return "";
+            SpiderDebug.log(e);
+            JSONObject result = new JSONObject();
+            result.put("parse", 1);
+            result.put("url", id);
+            try {
+                result.put("header", headerJson());
+            } catch (Exception ignored) {}
+            return result.toString();
         }
     }
 
@@ -478,5 +497,13 @@ public class DuShe extends Spider {
         obj.put("name", name);
         obj.put("value", values);
         return obj;
+    }
+
+    private int parseIntSafe(String s, int def) {
+        try {
+            return Integer.parseInt(s);
+        } catch (Exception e) {
+            return def;
+        }
     }
 }
