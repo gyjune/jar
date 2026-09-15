@@ -715,5 +715,49 @@ public class BeiChuan extends Spider {
             Document doc = Jsoup.parse(html);
             String iframeSrc = doc.select("iframe").attr("src");
             if (!TextUtils.isEmpty(iframeSrc)) {
-                if (iframeSrc.startsWith("//")) iframeSrc = "https:" + iframeSrc;
-                else if (iframeSrc.star
+                           if (iframeSrc.startsWith("//")) iframeSrc = "https:" + iframeSrc;
+                else if (iframeSrc.startsWith("/")) iframeSrc = API_HOST + iframeSrc;
+                JSONObject result = new JSONObject();
+                result.put("parse", 1);
+                result.put("url", iframeSrc);
+                result.put("header", headers());
+                return result.toString();
+            }
+
+            JSONObject result = new JSONObject();
+            result.put("parse", 1);
+            result.put("url", id);
+            result.put("header", headers());
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+            JSONObject result = new JSONObject();
+            result.put("parse", 1);
+            result.put("url", id);
+            return result.toString();
+        }
+    }
+
+    private JSONObject filterGroup(String key, String name, String[][] values) throws Exception {
+        JSONObject obj = new JSONObject();
+        obj.put("key", key);
+        obj.put("name", name);
+        JSONArray arr = new JSONArray();
+        for (String[] v : values) {
+            JSONObject item = new JSONObject();
+            item.put("n", v[0]);
+            item.put("v", v[1]);
+            arr.put(item);
+        }
+        obj.put("value", arr);
+        return obj;
+    }
+
+    private int parseIntSafe(String s, int def) {
+        try {
+            return Integer.parseInt(s);
+        } catch (Exception e) {
+            return def;
+        }
+    }
+}
