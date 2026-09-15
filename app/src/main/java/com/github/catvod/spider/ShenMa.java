@@ -31,7 +31,7 @@ public class ShenMa extends Spider {
             "(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)");
     private static final Pattern playerPattern = Pattern.compile(
             "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
-    private static final Pattern totalPattern = Pattern.compile(
+    private static final Pattern pageDisplayPattern = Pattern.compile(
             "共(\\d+)条数据,当前(\\d+)/(\\d+)页");
     private static final Pattern tailPagePattern = Pattern.compile(
             "<a[^>]*href=\"[^\"]*-----(\\d+)---[^\"]*\"[^>]*>尾页</a>");
@@ -69,6 +69,7 @@ public class ShenMa extends Spider {
     // ============================================================
     private String fixUrl(String url) {
         if (TextUtils.isEmpty(url)) return "";
+        url = url.trim();
         if (url.startsWith("//")) return "https:" + url;
         if (url.startsWith("http")) return url;
         if (url.startsWith("/")) return API_HOST + url;
@@ -89,7 +90,7 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // buildVodShowUrl
+    // buildVodShowUrl（11 个连字符占位）
     // ============================================================
     private String buildVodShowUrl(String tid, String area, String sort, String pg,
                                    String year, String cls) {
@@ -145,7 +146,7 @@ public class ShenMa extends Spider {
     private int extractPageCount(String html) {
         if (TextUtils.isEmpty(html)) return 1;
 
-        Matcher m1 = totalPattern.matcher(html);
+        Matcher m1 = pageDisplayPattern.matcher(html);
         if (m1.find()) return parseIntSafe(m1.group(3), 1);
 
         Matcher m2 = tailPagePattern.matcher(html);
@@ -161,7 +162,7 @@ public class ShenMa extends Spider {
         JSONObject info = new JSONObject();
         info.put("vod_id", vodId);
 
-        // 1. info-parameter
+        // info-parameter
         Matcher paramM = Pattern.compile(
                 "<div[^>]*class=\"info-parameter none\"[^>]*>([\\s\\S]*?)</div>\\s*</div>").matcher(html);
         if (paramM.find()) {
@@ -174,7 +175,6 @@ public class ShenMa extends Spider {
                 String key = emM.group(1).trim().replaceAll("[：:]", "").trim();
                 String content = li.replaceAll("<em[^>]*class=\"cor4\"[^>]*>.*?</em>", "");
 
-                // 优先取 <a> 文本
                 List<String> aTexts = new ArrayList<>();
                 Matcher aM = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(content);
                 while (aM.find()) aTexts.add(aM.group(1).trim());
@@ -197,7 +197,7 @@ public class ShenMa extends Spider {
             }
         }
 
-        // 2. 简介
+        // 简介
         Matcher descM = Pattern.compile(
                 "<div[^>]*id=\"height_limit\"[^>]*class=\"text[^\"]*\"[^>]*>([\\s\\S]*?)</div>").matcher(html);
         if (descM.find()) {
@@ -207,12 +207,12 @@ public class ShenMa extends Spider {
             info.put("vod_content", "");
         }
 
-        // 3. 海报
+        // 海报
         Matcher picM = Pattern.compile(
                 "<img[^>]*class=\"lazy lazy1 mask-1\"[^>]*data-src=\"([^\"]+)\"[^>]*>").matcher(html);
         info.put("vod_pic", picM.find() ? fixUrl(picM.group(1)) : "");
 
-        // 4. 播放列表
+        // 播放列表
         String[] playResult = extractPlaylist(html);
         info.put("vod_play_from", playResult[0]);
         info.put("vod_play_url", playResult[1]);
@@ -227,7 +227,7 @@ public class ShenMa extends Spider {
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
 
-        // 线路名：a.swiper-slide 里的 &nbsp; 后面的名字
+        // 线路名
         List<String> names = new ArrayList<>();
         Matcher tabM = Pattern.compile(
                 "<a[^>]*class=\"swiper-slide[^\"]*\"[^>]*>\\s*<i[^>]*></i>&nbsp;([^<]+?)(?:<span[^>]*>\\d+</span>)?</a>").matcher(html);
@@ -236,7 +236,6 @@ public class ShenMa extends Spider {
             if (!TextUtils.isEmpty(name) && !names.contains(name)) names.add(name);
         }
 
-        // 兜底：nav-dt
         if (names.isEmpty()) {
             Matcher navM = Pattern.compile(
                     "<a[^>]*class=\"swiper-slide[^\"]*nav-dt[^\"]*\"[^>]*>\\s*<i[^>]*></i>&nbsp;([^<]+)</a>").matcher(html);
@@ -246,7 +245,7 @@ public class ShenMa extends Spider {
             }
         }
 
-        // 选集块：ul.anthology-list-play.size
+        // 选集块
         List<List<String[]>> allPlaylists = new ArrayList<>();
         Matcher ulM = Pattern.compile(
                 "<ul[^>]*class=\"anthology-list-play size\"[^>]*>([\\s\\S]*?)</ul>").matcher(html);
@@ -304,41 +303,38 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // 提取 m3u8
+    // ★ 从播放页提取 m3u8（只抓 player_aaaa.url）
     // ============================================================
     private String extractM3u8(String html) {
         if (TextUtils.isEmpty(html)) return null;
 
+        // 1. player_aaaa
         Matcher pm = playerPattern.matcher(html);
         if (pm.find()) {
             try {
                 String raw = pm.group(1);
                 raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
                 raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                raw = raw.replace("\\/", "/");
                 raw = raw.replaceAll(",\\s*}", "}");
                 JSONObject p = new JSONObject(raw);
                 String url = p.optString("url", "");
-                if (!TextUtils.isEmpty(url) && (url.contains(".m3u8") || url.startsWith("https://"))) {
+                if (!TextUtils.isEmpty(url)) {
+                    SpiderDebug.log("player_aaaa url=" + url);
                     return cleanUrl(url);
                 }
             } catch (Exception e) {
-                SpiderDebug.log("player_aaaa parse error");
+                SpiderDebug.log("player_aaaa parse error: " + e.getMessage());
             }
         }
 
-        // iframe
-        Matcher ifM = Pattern.compile("<iframe[^>]*src=\"([^\"]+)\"[^>]*>").matcher(html);
-        if (ifM.find()) {
-            String src = ifM.group(1);
-            if (src.startsWith("//")) src = "https:" + src;
-            if (src.startsWith("/")) src = API_HOST + src;
-            if (src.contains("player/") || src.contains("vip/")) {
-                return cleanUrl(src);
-            }
-        }
-
+        // 2. 兜底：正则匹配 m3u8
         Matcher mm = m3u8Pattern.matcher(html);
-        if (mm.find()) return cleanUrl(mm.group(1));
+        if (mm.find()) {
+            SpiderDebug.log("regex m3u8=" + mm.group(1));
+            return cleanUrl(mm.group(1));
+        }
+
         return null;
     }
 
@@ -390,7 +386,6 @@ public class ShenMa extends Spider {
     private JSONObject buildFilters() throws Exception {
         JSONObject filters = new JSONObject();
 
-        // 地区
         JSONArray areaValues = new JSONArray();
         areaValues.put(filterValue("全部", ""));
         String[] areas = {"大陆", "香港", "台湾", "美国", "日本", "韩国", "英国", "法国",
@@ -399,20 +394,17 @@ public class ShenMa extends Spider {
                 "印度尼西亚", "挪威", "智利", "爱尔兰", "伊朗", "蒙古"};
         for (String a : areas) areaValues.put(filterValue(a, a));
 
-        // 年份
         JSONArray yearValues = new JSONArray();
         yearValues.put(filterValue("全部", ""));
         for (int y = 2026; y >= 2000; y--) {
             yearValues.put(filterValue(String.valueOf(y), String.valueOf(y)));
         }
 
-        // 排序
         JSONArray sortValues = new JSONArray();
         sortValues.put(filterValue("按最新", "time"));
         sortValues.put(filterValue("按最热", "hits"));
         sortValues.put(filterValue("按评分", "score"));
 
-        // 分类值（5 类）
         JSONArray classValues1 = buildClassValues(new String[][]{
                 {"", "全部"},
                 {"动作片", "动作片"}, {"喜剧片", "喜剧片"}, {"科幻片", "科幻片"},
@@ -469,7 +461,6 @@ public class ShenMa extends Spider {
                 {"年代穿越", "年代穿越"}, {"脑洞悬疑", "脑洞悬疑"}, {"现代都市", "现代都市"}
         });
 
-        // 组装
         JSONArray f1 = new JSONArray();
         f1.put(filterGroup("class", "类型", classValues1));
         f1.put(filterGroup("area", "地区", areaValues));
@@ -615,11 +606,12 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // playerContent
+    // ★ playerContent（只抓 player_aaaa.url）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         try {
+            // 1. id 是直链
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
@@ -629,6 +621,7 @@ public class ShenMa extends Spider {
                 return result.toString();
             }
 
+            // 2. 抓播放页
             String html = OkHttp.string(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
@@ -638,31 +631,18 @@ public class ShenMa extends Spider {
                 return result.toString();
             }
 
+            // 3. 从 player_aaaa 提取 url
             String videoUrl = extractM3u8(html);
+            JSONObject result = new JSONObject();
             if (!TextUtils.isEmpty(videoUrl)) {
-                JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", videoUrl);
                 result.put("header", m3u8Headers());
-                return result.toString();
-            }
-
-            Document doc = Jsoup.parse(html);
-            String iframeSrc = doc.select("iframe").attr("src");
-            if (!TextUtils.isEmpty(iframeSrc)) {
-                if (iframeSrc.startsWith("//")) iframeSrc = "https:" + iframeSrc;
-                else if (iframeSrc.startsWith("/")) iframeSrc = API_HOST + iframeSrc;
-                JSONObject result = new JSONObject();
+            } else {
                 result.put("parse", 1);
-                result.put("url", iframeSrc);
+                result.put("url", id);
                 result.put("header", headers());
-                return result.toString();
             }
-
-            JSONObject result = new JSONObject();
-            result.put("parse", 1);
-            result.put("url", id);
-            result.put("header", headers());
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
