@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * 支持分类、筛选、搜索、播放
  * 播放优先抓 player_aaaa 里的裸 m3u8，抓不到再走 iframe 代理
  */
-public class Dushe extends Spider {
+public class DuShe extends Spider {
 
     private static final String API_HOST = "https://www.dushehub.com";
     private static final String PROXY_HOST = "https://v.dushe.online";
