@@ -34,8 +34,6 @@ public class BeiChuan extends Spider {
             "var\\s+now\\s*=\\s*\"([^\"]+)\"");
     private static final Pattern playerPattern = Pattern.compile(
             "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
-    private static final Pattern tailPagePattern = Pattern.compile(
-            "<a[^>]*href=\"[^\"]*-(\\d+)\\.html\"[^>]*>尾页</");
 
     // ============================================================
     // header
@@ -105,10 +103,10 @@ public class BeiChuan extends Spider {
             if (TextUtils.isEmpty(href)) continue;
 
             String name = item.select("h4 a").text().trim();
-            if (TextUtils.isEmpty(name)) name = item.select("h4").text().trim();
+            if (TextUtils.isEmpty(name)) name = a.attr("title");
 
-            String pic = item.select("img").attr("data-original");
-            if (TextUtils.isEmpty(pic)) pic = a.attr("data-original");
+            String pic = a.attr("data-original");
+            if (TextUtils.isEmpty(pic)) pic = item.select("img").attr("data-original");
             if (TextUtils.isEmpty(pic)) pic = item.select("img").attr("src");
             if (!TextUtils.isEmpty(pic) && pic.contains("/load")) pic = "";
 
@@ -192,17 +190,14 @@ public class BeiChuan extends Spider {
     private String[] extractPlaylist(String html) {
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
-
         List<String> foundNames = new ArrayList<>();
 
-        // 方法1: card-item
         Matcher cardM = Pattern.compile("<div[^>]*class=\"[^\"]*card-item[^\"]*\"[^>]*>([^<]+)</div>").matcher(html);
         while (cardM.find()) {
             String name = cleanHtmlTags(cardM.group(1));
             if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) foundNames.add(name);
         }
 
-        // 方法2: card-nav
         if (foundNames.isEmpty()) {
             Matcher navM = Pattern.compile("<div[^>]*class=\"[^\"]*card-nav[^\"]*\"[^>]*>([\\s\\S]*?)</div>").matcher(html);
             if (navM.find()) {
@@ -214,7 +209,6 @@ public class BeiChuan extends Spider {
             }
         }
 
-        // 方法3: 隐藏 panel 的 h3/strong
         if (foundNames.isEmpty()) {
             Matcher panelM = Pattern.compile(
                     "<div class=\"stui-pannel stui-pannel-bg clearfix\" style=\"display: none;\">([\\s\\S]*?)</div>").matcher(html);
@@ -231,7 +225,6 @@ public class BeiChuan extends Spider {
             }
         }
 
-        // 方法4: "如果[ XXX ]播放源失败"
         if (foundNames.isEmpty()) {
             Matcher textM = Pattern.compile("如果\\[\\s*([^\\]]+)\\s*\\]播放源失败").matcher(html);
             while (textM.find()) {
@@ -240,14 +233,10 @@ public class BeiChuan extends Spider {
             }
         }
 
-        // 去重
         List<String> uniqueNames = new ArrayList<>();
         Set<String> set = new HashSet<>();
         for (String name : foundNames) if (set.add(name)) uniqueNames.add(name);
 
-        SpiderDebug.log("提取到的线路名称: " + uniqueNames);
-
-        // 提取所有播放列表
         List<List<String[]>> allPlaylists = new ArrayList<>();
         Matcher ulM = Pattern.compile(
                 "<ul[^>]*class=\"[^\"]*stui-content__playlist[^\"]*\"[^>]*>([\\s\\S]*?)</ul>").matcher(html);
@@ -263,8 +252,6 @@ public class BeiChuan extends Spider {
             }
             if (!eps.isEmpty()) allPlaylists.add(eps);
         }
-
-        SpiderDebug.log("找到播放列表数量: " + allPlaylists.size());
 
         int nameCount = uniqueNames.size();
         int playlistCount = allPlaylists.size();
@@ -312,7 +299,6 @@ public class BeiChuan extends Spider {
 
             playFrom.add(fromName);
             playUrl.add(epSb.toString());
-            SpiderDebug.log("线路 " + (i + 1) + ": " + fromName + " -> " + eps.size() + "集");
         }
 
         if (playFrom.isEmpty()) {
@@ -422,11 +408,12 @@ public class BeiChuan extends Spider {
     }
 
     // ============================================================
-    // buildFilters
+    // buildFilters（补 by 和 lang）
     // ============================================================
     private JSONObject buildFilters() throws Exception {
         JSONObject filters = new JSONObject();
 
+        // 电影
         JSONArray movieFilters = new JSONArray();
         movieFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"动作片", "5068662235"}, {"爱情片", "5079945566"},
@@ -439,8 +426,17 @@ public class BeiChuan extends Spider {
                 {"日本", "日本"}, {"韩国", "韩国"}, {"欧美", "欧美"}, {"泰国", "泰国"}, {"其他", "其他"}
         }));
         movieFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2010)));
+        movieFilters.put(filterGroup("by", "按排序", new String[][]{
+                {"默认", ""}, {"时间", "time"}, {"人气", "hit"}, {"推荐", "commend"}
+        }));
+        movieFilters.put(filterGroup("lang", "按语言", new String[][]{
+                {"全部", ""}, {"国语", "国语"}, {"粤语", "粤语"},
+                {"英语", "英语"}, {"日语", "日语"}, {"韩语", "韩语"},
+                {"泰语", "泰语"}, {"法语", "法语"}
+        }));
         filters.put("5922692431", movieFilters);
 
+        // 连续剧
         JSONArray tvFilters = new JSONArray();
         tvFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"国产剧", "5141765353"}, {"港台剧", "5153048684"},
@@ -452,8 +448,16 @@ public class BeiChuan extends Spider {
                 {"日本", "日本"}, {"韩国", "韩国"}, {"欧美", "欧美"}, {"泰国", "泰国"}
         }));
         tvFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2020)));
+        tvFilters.put(filterGroup("by", "按排序", new String[][]{
+                {"默认", ""}, {"时间", "time"}, {"人气", "hit"}, {"推荐", "commend"}
+        }));
+        tvFilters.put(filterGroup("lang", "按语言", new String[][]{
+                {"全部", ""}, {"国语", "国语"}, {"粤语", "粤语"},
+                {"英语", "英语"}, {"日语", "日语"}, {"韩语", "韩语"}
+        }));
         filters.put("5033975762", tvFilters);
 
+        // 综艺
         JSONArray varietyFilters = new JSONArray();
         varietyFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"国产综艺", "6332494542"}, {"港台综艺", "6343777873"},
@@ -464,8 +468,12 @@ public class BeiChuan extends Spider {
                 {"韩国", "韩国"}, {"日本", "日本"}, {"欧美", "欧美"}
         }));
         varietyFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2023)));
+        varietyFilters.put(filterGroup("by", "按排序", new String[][]{
+                {"默认", ""}, {"时间", "time"}, {"人气", "hit"}
+        }));
         filters.put("5046095573", varietyFilters);
 
+        // 动漫
         JSONArray animeFilters = new JSONArray();
         animeFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"国产动漫", "6389747677"}, {"日韩动漫", "6392031008"},
@@ -476,13 +484,20 @@ public class BeiChuan extends Spider {
                 {"欧美", "欧美"}, {"港台", "港台"}, {"其他", "其他"}
         }));
         animeFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2023)));
+        animeFilters.put(filterGroup("by", "按排序", new String[][]{
+                {"默认", ""}, {"时间", "time"}, {"人气", "hit"}
+        }));
         filters.put("5057378904", animeFilters);
 
+        // 短剧
         JSONArray shortFilters = new JSONArray();
         shortFilters.put(filterGroup("area", "按地区", new String[][]{
                 {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"}
         }));
         shortFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2024)));
+        shortFilters.put(filterGroup("by", "按排序", new String[][]{
+                {"默认", ""}, {"时间", "time"}, {"人气", "hit"}
+        }));
         filters.put("5218091400", shortFilters);
 
         return filters;
@@ -498,7 +513,7 @@ public class BeiChuan extends Spider {
     }
 
     // ============================================================
-    // ★ categoryContent（修复：把「全部」「不限」当空处理）
+    // ★ categoryContent（按 QPython 验证过的规则）
     // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
@@ -508,43 +523,55 @@ public class BeiChuan extends Spider {
             String area = extend != null && extend.get("area") != null ? extend.get("area") : "";
             String year = extend != null && extend.get("year") != null ? extend.get("year") : "";
             String cls  = extend != null && extend.get("class") != null ? extend.get("class") : "";
+            String by   = extend != null && extend.get("by") != null ? extend.get("by") : "";
+            String lang = extend != null && extend.get("lang") != null ? extend.get("lang") : "";
 
-            // ★ 关键：把占位值当空处理
+            // 把「全部」「不限」当空
             if ("全部".equals(area)) area = "";
             if ("全部".equals(year)) year = "";
             if ("全部".equals(cls)) cls = "";
+            if ("全部".equals(by)) by = "";
+            if ("全部".equals(lang)) lang = "";
             if ("不限".equals(area)) area = "";
             if ("不限".equals(year)) year = "";
             if ("不限".equals(cls)) cls = "";
+            if ("不限".equals(by)) by = "";
+            if ("不限".equals(lang)) lang = "";
 
-            SpiderDebug.log("category tid=" + tid + " pg=" + pg
-                    + " cls=" + cls + " area=" + area + " year=" + year);
-
-            String url = API_HOST + "/filter_sort/vod_list_" + tid;
+            // ★★★ 按 QPython 验证过的规则拼接 ★★★
+            String url;
             if (!TextUtils.isEmpty(cls)) {
-                url = API_HOST + "/filter_sort/vod_list_" + cls + ".html";
-            } else if (!TextUtils.isEmpty(area) && !TextUtils.isEmpty(year)) {
-                url = API_HOST + "/library-year-" + year + "-area-" + URLEncoder.encode(area, "UTF-8")
-                        + "-tid-" + tid + "-searchtype-5.html";
-            } else if (!TextUtils.isEmpty(area)) {
-                url = API_HOST + "/library-tid-" + tid + "-searchtype-5-area-"
-                        + URLEncoder.encode(area, "UTF-8") + ".html";
-            } else if (!TextUtils.isEmpty(year)) {
-                url = API_HOST + "/library-year-" + year + "-tid-" + tid + "-searchtype-5.html";
-            } else if (page > 1) {
-                url += "-" + page + ".html";
-            } else {
+                // 子分类：/filter_sort/vod_list_{cls}[-{page}].html
+                url = API_HOST + "/filter_sort/vod_list_" + cls;
+                if (page > 1) url += "-" + page;
                 url += ".html";
+            } else {
+                // 主分类
+                StringBuilder sb = new StringBuilder(API_HOST);
+                sb.append("/library");
+                if (!TextUtils.isEmpty(lang)) {
+                    sb.append("-yuyan-").append(URLEncoder.encode(lang, "UTF-8"));
+                }
+                if (!TextUtils.isEmpty(year)) {
+                    sb.append("-year-").append(year);
+                }
+                sb.append("-tid-").append(tid);
+                sb.append("-searchtype-5");
+                if (page > 1) {
+                    sb.append("-page-").append(page);
+                }
+                if (!TextUtils.isEmpty(by)) {
+                    sb.append("-order-").append(by);
+                }
+                if (!TextUtils.isEmpty(area)) {
+                    sb.append("-area-").append(URLEncoder.encode(area, "UTF-8"));
+                }
+                sb.append(".html");
+                url = sb.toString();
             }
 
-            SpiderDebug.log("category url: " + url);
-
             String html = OkHttp.string(url);
-            SpiderDebug.log("category html len=" + (html == null ? 0 : html.length()));
-
             JSONArray list = extractList(html);
-            SpiderDebug.log("category list size=" + list.length());
-
             int pagecount = extractPageCount(html);
 
             JSONObject result = new JSONObject();
@@ -566,18 +593,35 @@ public class BeiChuan extends Spider {
         }
     }
 
+    // ============================================================
+    // ★ extractPageCount（匹配 -page-N-）
+    // ============================================================
     private int extractPageCount(String html) {
         if (TextUtils.isEmpty(html)) return 1;
         int maxPage = 1;
 
-        Matcher m1 = tailPagePattern.matcher(html);
-        if (m1.find()) maxPage = parseIntSafe(m1.group(1), 1);
+        // 尾页：href="...-page-N-...">尾页
+        Matcher m1 = Pattern.compile("href=\"[^\"]*-page-(\\d+)-[^\"]*\">尾页</").matcher(html);
+        if (m1.find()) {
+            maxPage = parseIntSafe(m1.group(1), 1);
+        }
 
-        Matcher m2 = Pattern.compile("<a[^>]*href=\"[^\"]*-(\\d+)\\.html\"[^>]*>").matcher(html);
+        // 兜底：所有 -page-N-
+        Matcher m2 = Pattern.compile("-page-(\\d+)-").matcher(html);
         while (m2.find()) {
             int n = parseIntSafe(m2.group(1), 0);
             if (n > maxPage) maxPage = n;
         }
+
+        // 再兜底：filter_sort 的 -N.html
+        Matcher m3 = Pattern.compile("/filter_sort/vod_list_[^-]+\\.html|/filter_sort/vod_list_[^-]+-(\\d+)\\.html").matcher(html);
+        while (m3.find()) {
+            if (m3.group(1) != null) {
+                int n = parseIntSafe(m3.group(1), 0);
+                if (n > maxPage) maxPage = n;
+            }
+        }
+
         return maxPage;
     }
 
@@ -672,51 +716,4 @@ public class BeiChuan extends Spider {
             String iframeSrc = doc.select("iframe").attr("src");
             if (!TextUtils.isEmpty(iframeSrc)) {
                 if (iframeSrc.startsWith("//")) iframeSrc = "https:" + iframeSrc;
-                else if (iframeSrc.startsWith("/")) iframeSrc = API_HOST + iframeSrc;
-                JSONObject result = new JSONObject();
-                result.put("parse", 1);
-                result.put("url", iframeSrc);
-                result.put("header", headers());
-                return result.toString();
-            }
-
-            JSONObject result = new JSONObject();
-            result.put("parse", 1);
-            result.put("url", id);
-            result.put("header", headers());
-            return result.toString();
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-            JSONObject result = new JSONObject();
-            result.put("parse", 1);
-            result.put("url", id);
-            return result.toString();
-        }
-    }
-
-    // ============================================================
-    // 工具
-    // ============================================================
-    private JSONObject filterGroup(String key, String name, String[][] values) throws Exception {
-        JSONObject obj = new JSONObject();
-        obj.put("key", key);
-        obj.put("name", name);
-        JSONArray arr = new JSONArray();
-        for (String[] v : values) {
-            JSONObject item = new JSONObject();
-            item.put("n", v[0]);
-            item.put("v", v[1]);
-            arr.put(item);
-        }
-        obj.put("value", arr);
-        return obj;
-    }
-
-    private int parseIntSafe(String s, int def) {
-        try {
-            return Integer.parseInt(s);
-        } catch (Exception e) {
-            return def;
-        }
-    }
-}
+                else if (iframeSrc.star
