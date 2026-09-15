@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * 支持分类、筛选、搜索、播放
  * 利用 v.dushe.online 代理服务
  */
-public class Dushe extends Spider {
+public class DuShe extends Spider {
 
     private static final String API_HOST = "https://www.dushehub.com";
     private static final String PROXY_HOST = "https://v.dushe.online";
