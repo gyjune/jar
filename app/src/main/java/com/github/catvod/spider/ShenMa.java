@@ -2,9 +2,10 @@ package com.github.catvod.spider;
 
 import android.text.TextUtils;
 
+import com.github.catvod.bean.Result;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
-import com.github.catvod.utils.okhttp.OkHttpUtil;
+import com.github.catvod.net.OkHttp;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,7 +25,8 @@ import java.util.regex.Pattern;
 
 /**
  * 神马影院 - www.smyyok.com
- * 手工拼接 JSON（header 对象 + parse=1 加 jx:1）
+ * 严格按猫影视 / TVBox 官方规范
+ * playerContent 只返回 Result.get().url(url).string()
  */
 public class ShenMa extends Spider {
 
@@ -45,6 +47,29 @@ public class ShenMa extends Spider {
         header.put("User-Agent", userAgent);
         header.put("Referer", siteUrl + "/");
         return header;
+    }
+
+    private String req(String url) {
+        return OkHttp.string(url, getHeader());
+    }
+
+    // ============================================================
+    // buildVodShowUrl（11 个 '-'）
+    // ============================================================
+    private String buildVodShowUrl(String tid, String area, String sort, String pg, String year, String cls) {
+        String[] parts = new String[12];
+        Arrays.fill(parts, "");
+        parts[1] = area == null ? "" : area;
+        parts[2] = sort == null ? "" : sort;
+        parts[3] = cls == null ? "" : cls;
+        int page = parseIntSafe(pg, 1);
+        parts[8] = page > 1 ? pg : "";
+
+        StringBuilder url = new StringBuilder("/vodshow/").append(tid);
+        url.append(TextUtils.join("-", parts));
+        if (!TextUtils.isEmpty(year)) url.append(year);
+        url.append(".html");
+        return url.toString();
     }
 
     // ============================================================
@@ -95,7 +120,7 @@ public class ShenMa extends Spider {
                 JSONObject p = new JSONObject(raw);
                 String url = p.optString("url", "");
                 if (!TextUtils.isEmpty(url) && url.contains(".m3u8")) {
-                    return cleanUrl(url);
+                    return url;
                 }
             } catch (Exception e) {
                 SpiderDebug.log("player_aaaa parse error");
@@ -103,27 +128,8 @@ public class ShenMa extends Spider {
         }
 
         Matcher mm = m3u8Pattern.matcher(html);
-        if (mm.find()) return cleanUrl(mm.group(1));
+        if (mm.find()) return mm.group(1);
         return null;
-    }
-
-    // ============================================================
-    // buildVodShowUrl（11 个 '-'）
-    // ============================================================
-    private String buildVodShowUrl(String tid, String area, String sort, String pg, String year, String cls) {
-        String[] parts = new String[12];
-        Arrays.fill(parts, "");
-        parts[1] = area == null ? "" : area;
-        parts[2] = sort == null ? "" : sort;
-        parts[3] = cls == null ? "" : cls;
-        int page = parseIntSafe(pg, 1);
-        parts[8] = page > 1 ? pg : "";
-
-        StringBuilder url = new StringBuilder("/vodshow/").append(tid);
-        url.append(TextUtils.join("-", parts));
-        if (!TextUtils.isEmpty(year)) url.append(year);
-        url.append(".html");
-        return url.toString();
     }
 
     // ============================================================
@@ -146,6 +152,14 @@ public class ShenMa extends Spider {
 
         if (filter) {
             result.put("filters", buildFilters());
+        }
+
+        try {
+            String html = req(siteUrl + "/");
+            result.put("list", extractList(html));
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+            result.put("list", new JSONArray());
         }
 
         return result.toString();
@@ -275,63 +289,35 @@ public class ShenMa extends Spider {
         return arr;
     }
 
-    @Override
-    public String homeVideoContent() throws Exception {
-        JSONObject result = new JSONObject();
-        try {
-            String html = OkHttpUtil.string(siteUrl + "/", getHeader());
-            JSONArray list = extractList(html);
-            JSONArray out = new JSONArray();
-            for (int i = 0; i < Math.min(list.length(), 12); i++) out.put(list.get(i));
-            result.put("list", out);
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-            result.put("list", new JSONArray());
-        }
-        return result.toString();
-    }
-
     // ============================================================
     // 分类
     // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
                                   HashMap<String, String> extend) throws Exception {
-        try {
-            String cls = extend != null && extend.get("class") != null ? extend.get("class") : "";
-            String area = extend != null && extend.get("area") != null ? extend.get("area") : "";
-            String year = extend != null && extend.get("year") != null ? extend.get("year") : "";
-            String sort = extend != null && extend.get("sort") != null ? extend.get("sort") : "";
+        String cls = extend != null && extend.get("class") != null ? extend.get("class") : "";
+        String area = extend != null && extend.get("area") != null ? extend.get("area") : "";
+        String year = extend != null && extend.get("year") != null ? extend.get("year") : "";
+        String sort = extend != null && extend.get("sort") != null ? extend.get("sort") : "";
 
-            if ("全部".equals(cls)) cls = "";
-            if ("全部".equals(area)) area = "";
-            if ("全部".equals(year)) year = "";
-            if ("全部".equals(sort)) sort = "";
+        if ("全部".equals(cls)) cls = "";
+        if ("全部".equals(area)) area = "";
+        if ("全部".equals(year)) year = "";
+        if ("全部".equals(sort)) sort = "";
 
-            String url = siteUrl + buildVodShowUrl(tid, area, sort, pg, year, cls);
-            SpiderDebug.log("category url: " + url);
+        String url = siteUrl + buildVodShowUrl(tid, area, sort, pg, year, cls);
+        SpiderDebug.log("category url: " + url);
 
-            String html = OkHttpUtil.string(url, getHeader());
-            JSONArray list = extractList(html);
-            int page = parseIntSafe(pg, 1);
+        JSONArray videos = extractList(req(url));
+        int page = parseIntSafe(pg, 1);
 
-            JSONObject result = new JSONObject();
-            result.put("page", page);
-            result.put("pagecount", page + 1);
-            result.put("limit", 24);
-            result.put("total", Integer.MAX_VALUE);
-            result.put("list", list);
-            return result.toString();
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-            JSONObject result = new JSONObject();
-            result.put("page", parseIntSafe(pg, 1));
-            result.put("list", new JSONArray());
-            result.put("pagecount", 1);
-            result.put("limit", 24);
-            result.put("total", 0);
-            return result.toString();
-        }
+        JSONObject result = new JSONObject();
+        result.put("page", page);
+        result.put("pagecount", page + 1);
+        result.put("limit", 24);
+        result.put("total", Integer.MAX_VALUE);
+        result.put("list", videos);
+        return result.toString();
     }
 
     // ============================================================
@@ -339,96 +325,66 @@ public class ShenMa extends Spider {
     // ============================================================
     @Override
     public String detailContent(List<String> ids) throws Exception {
-        try {
-            String vodId = ids.get(0);
-            String detailUrl = vodId.startsWith("http") ? vodId : siteUrl + vodId;
-            String html = OkHttpUtil.string(detailUrl, getHeader());
+        String vodId = ids.get(0);
+        String detailUrl = vodId.startsWith("http") ? vodId : siteUrl + vodId;
+        String html = req(detailUrl);
 
-            JSONObject info = new JSONObject();
-            info.put("vod_id", vodId);
+        JSONObject info = new JSONObject();
+        info.put("vod_id", vodId);
 
-            Matcher paramM = Pattern.compile(
-                    "<div[^>]*class=\"info-parameter none\"[^>]*>([\\s\\S]*?)</div>\\s*</div>").matcher(html);
-            if (paramM.find()) {
-                Matcher liM = Pattern.compile("<li>(.*?)</li>").matcher(paramM.group(1));
-                while (liM.find()) {
-                    String li = liM.group(1);
-                    Matcher emM = Pattern.compile("<em[^>]*class=\"cor4\"[^>]*>([^<]+)</em>").matcher(li);
-                    if (!emM.find()) continue;
-                    String key = emM.group(1).trim().replaceAll("[：:]", "").trim();
-                    String content = li.replaceAll("<em[^>]*class=\"cor4\"[^>]*>.*?</em>", "");
+        Matcher paramM = Pattern.compile(
+                "<div[^>]*class=\"info-parameter none\"[^>]*>([\\s\\S]*?)</div>\\s*</div>").matcher(html);
+        if (paramM.find()) {
+            Matcher liM = Pattern.compile("<li>(.*?)</li>").matcher(paramM.group(1));
+            while (liM.find()) {
+                String li = liM.group(1);
+                Matcher emM = Pattern.compile("<em[^>]*class=\"cor4\"[^>]*>([^<]+)</em>").matcher(li);
+                if (!emM.find()) continue;
+                String key = emM.group(1).trim().replaceAll("[：:]", "").trim();
+                String content = li.replaceAll("<em[^>]*class=\"cor4\"[^>]*>.*?</em>", "");
 
-                    List<String> aTexts = new ArrayList<>();
-                    Matcher aM = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(content);
-                    while (aM.find()) aTexts.add(aM.group(1).trim());
-                    if (!aTexts.isEmpty()) {
-                        content = TextUtils.join(" ", aTexts);
-                    } else {
-                        content = content.replaceAll("<[^>]+>", "").trim();
-                    }
-                    content = content.replaceAll("\\s+", " ").trim();
+                List<String> aTexts = new ArrayList<>();
+                Matcher aM = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(content);
+                while (aM.find()) aTexts.add(aM.group(1).trim());
+                if (!aTexts.isEmpty()) {
+                    content = TextUtils.join(" ", aTexts);
+                } else {
+                    content = content.replaceAll("<[^>]+>", "").trim();
+                }
+                content = content.replaceAll("\\s+", " ").trim();
 
-                    switch (key) {
-                        case "片名": info.put("vod_name", content); break;
-                        case "主演": info.put("vod_actor", content); break;
-                        case "导演": info.put("vod_director", content); break;
-                        case "年份": info.put("vod_year", content); break;
-                        case "地区": info.put("vod_area", content); break;
-                        case "类型": info.put("type_name", content); break;
-                        default: break;
-                    }
+                switch (key) {
+                    case "片名": info.put("vod_name", content); break;
+                    case "主演": info.put("vod_actor", content); break;
+                    case "导演": info.put("vod_director", content); break;
+                    case "年份": info.put("vod_year", content); break;
+                    case "地区": info.put("vod_area", content); break;
+                    case "类型": info.put("type_name", content); break;
+                    default: break;
                 }
             }
-
-            Matcher descM = Pattern.compile(
-                    "<div[^>]*id=\"height_limit\"[^>]*class=\"text[^\"]*\"[^>]*>([\\s\\S]*?)</div>").matcher(html);
-            if (descM.find()) {
-                info.put("vod_content", "神马影院提醒你注意广告防止被骗！"
-                        + descM.group(1).replaceAll("<[^>]+>", "").trim());
-            } else {
-                info.put("vod_content", "");
-            }
-
-            Matcher picM = Pattern.compile(
-                    "<img[^>]*class=\"lazy lazy1 mask-1\"[^>]*data-src=\"([^\"]+)\"[^>]*>").matcher(html);
-            info.put("vod_pic", picM.find() ? fixUrl(picM.group(1)) : "");
-
-            String[] playResult = extractPlaylist(html);
-            info.put("vod_play_from", playResult[0]);
-            info.put("vod_play_url", playResult[1]);
-
-            JSONObject result = new JSONObject();
-            JSONArray list = new JSONArray();
-            list.put(info);
-            result.put("list", list);
-            return result.toString();
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-            JSONObject result = new JSONObject();
-            result.put("list", new JSONArray());
-            return result.toString();
         }
-    }
 
-    private String[] extractPlaylist(String html) {
-        List<String> playFrom = new ArrayList<>();
-        List<String> playUrl = new ArrayList<>();
+        Matcher descM = Pattern.compile(
+                "<div[^>]*id=\"height_limit\"[^>]*class=\"text[^\"]*\"[^>]*>([\\s\\S]*?)</div>").matcher(html);
+        if (descM.find()) {
+            info.put("vod_content", "神马影院提醒你注意广告防止被骗！"
+                    + descM.group(1).replaceAll("<[^>]+>", "").trim());
+        } else {
+            info.put("vod_content", "");
+        }
 
+        Matcher picM = Pattern.compile(
+                "<img[^>]*class=\"lazy lazy1 mask-1\"[^>]*data-src=\"([^\"]+)\"[^>]*>").matcher(html);
+        info.put("vod_pic", picM.find() ? fixUrl(picM.group(1)) : "");
+
+        // 线路/选集
         List<String> names = new ArrayList<>();
         Matcher tabM = Pattern.compile(
                 "<a[^>]*class=\"swiper-slide[^\"]*\"[^>]*>\\s*<i[^>]*></i>&nbsp;([^<]+?)(?:<span[^>]*>\\d+</span>)?</a>").matcher(html);
         while (tabM.find()) {
             String name = tabM.group(1).trim();
             if (!TextUtils.isEmpty(name) && !names.contains(name)) names.add(name);
-        }
-
-        if (names.isEmpty()) {
-            Matcher navM = Pattern.compile(
-                    "<a[^>]*class=\"swiper-slide[^\"]*nav-dt[^\"]*\"[^>]*>\\s*<i[^>]*></i>&nbsp;([^<]+)</a>").matcher(html);
-            while (navM.find()) {
-                String name = navM.group(1).trim();
-                if (!TextUtils.isEmpty(name) && !names.contains(name)) names.add(name);
-            }
         }
 
         List<List<String[]>> allPlaylists = new ArrayList<>();
@@ -448,6 +404,8 @@ public class ShenMa extends Spider {
             if (!eps.isEmpty()) allPlaylists.add(eps);
         }
 
+        List<String> playFrom = new ArrayList<>();
+        List<String> playUrl = new ArrayList<>();
         for (int i = 0; i < allPlaylists.size(); i++) {
             List<String[]> eps = allPlaylists.get(i);
             String fromName = i < names.size() ? names.get(i) : "线路" + (i + 1);
@@ -461,7 +419,14 @@ public class ShenMa extends Spider {
             playUrl.add(epSb.toString());
         }
 
-        return new String[]{TextUtils.join("$$$", playFrom), TextUtils.join("$$$", playUrl)};
+        info.put("vod_play_from", TextUtils.join("$$$", playFrom));
+        info.put("vod_play_url", TextUtils.join("$$$", playUrl));
+
+        JSONObject result = new JSONObject();
+        JSONArray list = new JSONArray();
+        list.put(info);
+        result.put("list", list);
+        return result.toString();
     }
 
     // ============================================================
@@ -469,62 +434,41 @@ public class ShenMa extends Spider {
     // ============================================================
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
-        try {
-            String encoded = URLEncoder.encode(key, "UTF-8");
-            String url = siteUrl + "/vodsearch/" + encoded + "-------------.html";
-            String html = OkHttpUtil.string(url, getHeader());
-            JSONArray list = extractList(html);
-
-            JSONObject result = new JSONObject();
-            result.put("list", list);
-            result.put("page", 1);
-            result.put("pagecount", 1);
-            return result.toString();
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-            JSONObject result = new JSONObject();
-            result.put("list", new JSONArray());
-            return result.toString();
-        }
+        String encoded = URLEncoder.encode(key, "UTF-8");
+        String url = siteUrl + "/vodsearch/" + encoded + "-------------.html";
+        JSONArray videos = extractList(req(url));
+        JSONObject result = new JSONObject();
+        result.put("list", videos);
+        return result.toString();
     }
 
     // ============================================================
-    // ★ playerContent（手工拼接 JSON）
-    // header 是对象
-    // parse=0 直链不加 jx
-    // parse=1 加 jx:1
+    // ★ playerContent（严格按官方规范：只返回 url）
+    // 神马所有线路 url 都是 m3u8，直接返回
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        try {
-            // 手工拼 header 对象
-            String headerJson = "{\"User-Agent\":\"" + userAgent + "\",\"Referer\":\"" + siteUrl + "/\",\"Accept\":\"*/*\"}";
-
-            // 1. id 本身是直链
-            if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
-                    Pattern.CASE_INSENSITIVE).matcher(id).find()) {
-                return "{\"parse\":0,\"url\":\"" + id + "\",\"header\":" + headerJson + "}";
-            }
-
-            // 2. 抓播放页
-            String html = OkHttpUtil.string(id, getHeader());
-            if (TextUtils.isEmpty(html)) {
-                return "{\"parse\":1,\"jx\":1,\"url\":\"" + id + "\",\"header\":" + headerJson + "}";
-            }
-
-            // 3. 提取 m3u8
-            String videoUrl = extractM3u8(html);
-            if (!TextUtils.isEmpty(videoUrl)) {
-                SpiderDebug.log("直连 m3u8=" + videoUrl);
-                return "{\"parse\":0,\"url\":\"" + videoUrl + "\",\"header\":" + headerJson + "}";
-            }
-
-            // 4. 最终兜底
-            return "{\"parse\":1,\"jx\":1,\"url\":\"" + id + "\",\"header\":" + headerJson + "}";
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-            return "{\"parse\":1,\"jx\":1,\"url\":\"" + id + "\"}";
+        // 1. id 本身是直链
+        if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
+                Pattern.CASE_INSENSITIVE).matcher(id).find()) {
+            return Result.get().url(id).string();
         }
+
+        // 2. 抓播放页
+        String html = req(id);
+        if (TextUtils.isEmpty(html)) {
+            return Result.get().url(id).string();
+        }
+
+        // 3. 提取 m3u8
+        String videoUrl = extractM3u8(html);
+        if (!TextUtils.isEmpty(videoUrl)) {
+            SpiderDebug.log("direct m3u8=" + videoUrl);
+            return Result.get().url(videoUrl).string();
+        }
+
+        // 4. 兜底
+        return Result.get().url(id).string();
     }
 
     // ============================================================
@@ -537,14 +481,6 @@ public class ShenMa extends Spider {
         if (url.startsWith("http")) return url;
         if (url.startsWith("/")) return siteUrl + url;
         return siteUrl + "/" + url;
-    }
-
-    private String cleanUrl(String url) {
-        if (TextUtils.isEmpty(url)) return "";
-        url = url.replace("\\/", "/");
-        url = url.replaceAll("^[\"']|[\"']$", "").trim();
-        if (url.startsWith("//")) url = "https:" + url;
-        return url;
     }
 
     private JSONObject filterValue(String name, String value) throws Exception {
