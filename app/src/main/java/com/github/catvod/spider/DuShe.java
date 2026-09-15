@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * 支持分类、筛选、搜索、播放
  * 利用 v.dushe.online 代理服务
  */
-public class DuShe extends Spider {
+public class Dushe extends Spider {
 
     private static final String API_HOST = "https://www.dushehub.com";
     private static final String PROXY_HOST = "https://v.dushe.online";
@@ -273,20 +273,23 @@ public class DuShe extends Spider {
         info.put("vod_play_from", "");
         info.put("vod_play_url", "");
 
+        // 标题
         String title = find("<h1>([^<]+)</h1>", html);
         if (!title.isEmpty()) info.put("vod_name", title);
 
+        // 海报
         String pic = find("<div class=\"module-item-pic\">\\s*<img[^>]*data-original=\"([^\"]+)\"", html);
         if (!pic.isEmpty()) info.put("vod_pic", fixUrl(pic));
 
-        // 标签
+        // 标签：年份 / 地区 / 分类
         List<String> tags = new ArrayList<>();
-        Pattern tp = Pattern.compile(
-                "<div class=\"module-info-tag-link\">\\s*<a[^>]*>([^<]+)</a>\\s*</div>");
-        Matcher tm = tp.matcher(html);
+        Matcher tm = Pattern.compile(
+                "<div class=\"module-info-tag-link\">\\s*<a[^>]*>([^<]+)</a>\\s*</div>").matcher(html);
         while (tm.find()) tags.add(tm.group(1).trim());
 
-        List<String> areas = Arrays.asList("中国大陆", "中国香港", "中国台湾", "美国", "韩国", "日本", "英国", "法国", "泰国");
+        List<String> areas = Arrays.asList(
+                "中国大陆", "中国香港", "中国台湾", "美国", "韩国",
+                "日本", "英国", "法国", "泰国");
         StringBuilder classSb = new StringBuilder();
         for (String tag : tags) {
             if (tag.matches("^\\d{4}$")) {
@@ -300,7 +303,9 @@ public class DuShe extends Spider {
         }
         info.put("vod_class", classSb.toString());
 
-        String desc = find("<div class=\"module-info-introduction-content\">\\s*<p>([^<]+)</p>", html);
+        // 简介
+        String desc = find(
+                "<div class=\"module-info-introduction-content\">\\s*<p>([^<]+)</p>", html);
         if (!desc.isEmpty()) info.put("vod_content", desc);
 
         // 导演
@@ -325,18 +330,43 @@ public class DuShe extends Spider {
             info.put("vod_actor", TextUtils.join("/", actors));
         }
 
-        // 播放列表
-        List<String> playBlocks = new ArrayList<>();
-        Pattern bp = Pattern.compile(
-                "<div class=\"module-list sort-list tab-list[^\"]*\" id=\"panel[^\"]*\">\\s*<div class=\"module-play-list\">\\s*<div class=\"module-play-list-content[^\"]*\">(.*?)</div>\\s*</div>\\s*</div>",
-                Pattern.DOTALL);
-        Matcher bm = bp.matcher(html);
-        while (bm.find()) playBlocks.add(bm.group(1));
-
+        // ====== 线路名 + 集数（方案 A：分两步抓） ======
         List<String> cleanFromNames = new ArrayList<>();
         Matcher fnm = Pattern.compile(
-                "<label class=\"module-tab-name\">\\s*<span[^>]*>([^<]+)</span>").matcher(html);
-        while (fnm.find()) cleanFromNames.add(fnm.group(1).trim());
+                "<div[^>]*class=\"[^\"]*module-tab-item[^\"]*\"[^>]*>.*?</div>",
+                Pattern.DOTALL).matcher(html);
+
+        while (fnm.find()) {
+            String block = fnm.group();
+
+            // 名字：优先 data-dropdown-value，没有就用 <span>
+            String name = "";
+            Matcher nm = Pattern.compile("data-dropdown-value=\"([^\"]+)\"").matcher(block);
+            if (nm.find()) {
+                name = nm.group(1).trim();
+            } else {
+                Matcher sm = Pattern.compile("<span>([^<]+)</span>").matcher(block);
+                if (sm.find()) name = sm.group(1).trim();
+            }
+            if (name.isEmpty()) continue;
+
+            // 集数：<small> 里有就带上
+            String count = "";
+            Matcher cm = Pattern.compile("<small>([^<]*)</small>").matcher(block);
+            if (cm.find()) count = cm.group(1).trim();
+
+            cleanFromNames.add(count.isEmpty() ? name : name + "[" + count + "]");
+        }
+        System.out.println("fromNames = " + cleanFromNames);
+
+        // ====== 播放列表（id="panelN" 锚点） ======
+        List<String> playBlocks = new ArrayList<>();
+        Matcher pbm = Pattern.compile(
+                "<div[^>]*id=\"panel\\d+\"[^>]*>\\s*<div class=\"module-play-list\">\\s*<div class=\"module-play-list-content[^\"]*\">(.*?)</div>\\s*</div>\\s*</div>",
+                Pattern.DOTALL).matcher(html);
+        while (pbm.find()) playBlocks.add(pbm.group(1));
+
+        System.out.println("playBlocks size = " + playBlocks.size());
 
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
@@ -344,7 +374,7 @@ public class DuShe extends Spider {
         for (int i = 0; i < playBlocks.size(); i++) {
             List<String> eps = new ArrayList<>();
             Matcher epm = Pattern.compile(
-                    "<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>")
+                    "<a[^>]*class=\"[^\"]*module-play-list-link[^\"]*\"[^>]*href=\"([^\"]+)\"[^>]*>\\s*<span>([^<]+)</span>")
                     .matcher(playBlocks.get(i));
             while (epm.find()) {
                 String epUrl = fixUrl(epm.group(1));
@@ -359,6 +389,8 @@ public class DuShe extends Spider {
                 playUrl.add(TextUtils.join("#", eps));
             }
         }
+
+        System.out.println("playFrom = " + playFrom);
 
         info.put("vod_play_from", TextUtils.join("$$$", playFrom));
         info.put("vod_play_url", TextUtils.join("$$$", playUrl));
