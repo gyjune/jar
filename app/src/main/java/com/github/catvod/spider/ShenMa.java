@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
 /**
  * 神马影院 - www.smyyok.com
  * 结构参考 Dm84
- * header 用 JSONObject 对象
+ * 播放：所有线路 url 都是 m3u8，直接 parse:0
  */
 public class ShenMa extends Spider {
 
@@ -70,19 +70,6 @@ public class ShenMa extends Spider {
         return url;
     }
 
-    // ★ header 返回 JSONObject（对象）
-    private JSONObject headerJson() {
-        JSONObject h = new JSONObject();
-        try {
-            h.put("User-Agent", userAgent);
-            h.put("Referer", siteUrl + "/");
-            h.put("Accept", "*/*");
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-        }
-        return h;
-    }
-
     // ============================================================
     // buildVodShowUrl（11 个 '-'）
     // ============================================================
@@ -103,7 +90,7 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // 列表解析（复用）
+    // 列表解析
     // ============================================================
     private JSONArray parseVodList(String url) throws Exception {
         String html = req(url);
@@ -486,74 +473,67 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // 播放：抓 player_aaaa.url → parse:0，header 用对象
+    // 播放：所有线路 url 都是 m3u8，直接 parse:0
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         try {
+            // 1. id 本身是直链
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", id);
-                result.put("header", headerJson());   // ★ 对象
                 return result.toString();
             }
 
+            // 2. 抓播放页
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 1);
                 result.put("url", id);
-                result.put("header", headerJson());   // ★ 对象
                 return result.toString();
             }
 
+            // 3. player_aaaa
             Matcher pm = Pattern.compile("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})").matcher(html);
             if (pm.find()) {
-                try {
-                    String raw = pm.group(1);
-                    raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
-                    raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
-                    raw = raw.replace("\\/", "/");
-                    raw = raw.replaceAll(",\\s*}", "}");
-                    JSONObject p = new JSONObject(raw);
-                    String url = p.optString("url", "");
-                    if (!TextUtils.isEmpty(url)) {
-                        SpiderDebug.log("player_aaaa url=" + url);
-                        JSONObject result = new JSONObject();
-                        result.put("parse", 0);
-                        result.put("url", cleanUrl(url));
-                        result.put("header", headerJson());   // ★ 对象
-                        return result.toString();
-                    }
-                } catch (Exception e) {
-                    SpiderDebug.log("player_aaaa parse error");
+                String raw = pm.group(1);
+                raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                raw = raw.replace("\\/", "/");
+                raw = raw.replaceAll(",\\s*}", "}");
+                JSONObject p = new JSONObject(raw);
+                String url = p.optString("url", "");
+                if (!TextUtils.isEmpty(url)) {
+                    SpiderDebug.log("直连 m3u8=" + url);
+                    JSONObject result = new JSONObject();
+                    result.put("parse", 0);
+                    result.put("url", cleanUrl(url));
+                    return result.toString();
                 }
             }
 
+            // 4. 兜底：正则抓 m3u8
             Matcher mm = Pattern.compile("(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)").matcher(html);
             if (mm.find()) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", cleanUrl(mm.group(1)));
-                result.put("header", headerJson());   // ★ 对象
                 return result.toString();
             }
 
+            // 5. 最终兜底
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            result.put("header", headerJson());   // ★ 对象
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            try {
-                result.put("header", headerJson());
-            } catch (Exception ignored) {}
             return result.toString();
         }
     }
