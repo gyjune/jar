@@ -35,6 +35,8 @@ public class DuShe extends Spider {
     private static final Pattern tailPagePattern = Pattern.compile(
             "(\\d+)---\\.html");
 
+    private static final String UA = "Mozilla/5.0 (Linux; Android 14; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+
     // ============================================================
     // 首页：分类 + 筛选
     // ============================================================
@@ -372,16 +374,17 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // 播放：先自己拼 player_aaaa，拼不出来才抠 iframe
+    // 播放：完全对齐 JS 版
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         JSONObject result = new JSONObject();
 
-        // 1. id 本身是直链
+        // 1. id 本身是直链 → parse=0
         if (directVideoPattern.matcher(id).find()) {
             result.put("parse", 0);
             result.put("url", id);
+            result.put("header", m3u8Headers());
             return result.toString();
         }
 
@@ -390,6 +393,7 @@ public class DuShe extends Spider {
         if (TextUtils.isEmpty(html)) {
             result.put("parse", 1);
             result.put("url", id);
+            result.put("header", headers());
             return result.toString();
         }
 
@@ -397,24 +401,30 @@ public class DuShe extends Spider {
         String playUrl = extractPlayUrl(html);
         SpiderDebug.log("play extracted=" + playUrl);
 
-        // 4. 是代理地址 → parse=1
-        if (!TextUtils.isEmpty(playUrl) && playUrl.contains("v.dushe.online")) {
+        if (!TextUtils.isEmpty(playUrl)) {
+            // 3a. 代理地址 → parse=1（带完整 HEADERS）
+            if (playUrl.contains("v.dushe.online")) {
+                result.put("parse", 1);
+                result.put("url", playUrl);
+                result.put("header", headers());
+            }
+            // 3b. 直链 → parse=0（带 M3U8_HEADERS）
+            else if (directVideoPattern.matcher(playUrl).find()) {
+                result.put("parse", 0);
+                result.put("url", playUrl);
+                result.put("header", m3u8Headers());
+            }
+            // 3c. 其它 → parse=1
+            else {
+                result.put("parse", 1);
+                result.put("url", playUrl);
+                result.put("header", headers());
+            }
+        } else {
+            // 4. 兜底
             result.put("parse", 1);
-            result.put("url", playUrl);
-            JSONObject headers = new JSONObject();
-            headers.put("Referer", siteUrl + "/");
-            headers.put("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
-            result.put("header", headers.toString());
-        }
-        // 5. 是直链 → parse=0
-        else if (!TextUtils.isEmpty(playUrl) && directVideoPattern.matcher(playUrl).find()) {
-            result.put("parse", 0);
-            result.put("url", playUrl);
-        }
-        // 6. 其它 → parse=1 兜底
-        else {
-            result.put("parse", 1);
-            result.put("url", playUrl != null ? playUrl : id);
+            result.put("url", id);
+            result.put("header", headers());
         }
 
         return result.toString();
@@ -429,7 +439,6 @@ public class DuShe extends Spider {
             Matcher matcher = playerPattern.matcher(html);
             if (matcher.find()) {
                 String raw = matcher.group(1);
-                // 修成合法 JSON
                 raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
                 raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
                 raw = raw.replace("\\/", "/");
@@ -437,7 +446,7 @@ public class DuShe extends Spider {
 
                 JSONObject p = new JSONObject(raw);
                 String url = p.optString("url", "");
-                // ★ 关键：next 用 link_next
+                // ★ next 用 link_next
                 String next = p.optString("link_next", "");
                 if (!TextUtils.isEmpty(next) && next.startsWith("/")) {
                     next = siteUrl + next;
@@ -475,6 +484,37 @@ public class DuShe extends Spider {
             SpiderDebug.log(e);
         }
         return null;
+    }
+
+    // ============================================================
+    // header：完全对齐 JS 版 HEADERS（4 项）
+    // ============================================================
+    private String headers() {
+        JSONObject h = new JSONObject();
+        try {
+            h.put("User-Agent", UA);
+            h.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            h.put("Accept-Language", "zh-CN,zh;q=0.9");
+            h.put("Referer", siteUrl + "/");
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+        }
+        return h.toString();
+    }
+
+    // ============================================================
+    // header：完全对齐 JS 版 M3U8_HEADERS（3 项）
+    // ============================================================
+    private String m3u8Headers() {
+        JSONObject h = new JSONObject();
+        try {
+            h.put("User-Agent", UA);
+            h.put("Referer", siteUrl + "/");
+            h.put("Accept", "*/*");
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+        }
+        return h.toString();
     }
 
     // ============================================================
