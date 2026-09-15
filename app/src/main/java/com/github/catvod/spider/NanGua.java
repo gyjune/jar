@@ -15,7 +15,6 @@ import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -34,9 +33,11 @@ public class NanGua extends Spider {
             "(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)");
     private static final Pattern playerPattern = Pattern.compile(
             "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
+    private static final Pattern bgImagePattern = Pattern.compile(
+            "background-image:\\s*url\\(([^)]+)\\)");
 
     // ============================================================
-    // 工具：header
+    // header
     // ============================================================
     private String headers() {
         try {
@@ -64,27 +65,18 @@ public class NanGua extends Spider {
     }
 
     // ============================================================
-    // 构建筛选URL（短横线总数固定 11 个）
+    // buildVodShowUrl（短横线总数固定 11）
     // ============================================================
     private String buildVodShowUrl(String tid, String area, String sort, String pg, String year) {
         int page = parseIntSafe(pg, 1);
         StringBuilder url = new StringBuilder("/vodshow/" + tid);
 
-        // 1. 地区
-        if (!TextUtils.isEmpty(area)) {
-            url.append("-").append(area);
-        }
-
-        // 2. 排序（规则：无地区时用 --sort，有地区时用 -sort）
+        if (!TextUtils.isEmpty(area)) url.append("-").append(area);
         if (!TextUtils.isEmpty(sort)) {
-            if (!TextUtils.isEmpty(area)) {
-                url.append("-").append(sort);
-            } else {
-                url.append("--").append(sort);
-            }
+            if (!TextUtils.isEmpty(area)) url.append("-").append(sort);
+            else url.append("--").append(sort);
         }
 
-        // 3. 计算已用的 '-'
         int usedDash = 0;
         if (!TextUtils.isEmpty(area)) usedDash += 1;
         if (!TextUtils.isEmpty(sort)) {
@@ -92,10 +84,7 @@ public class NanGua extends Spider {
             else usedDash += 2;
         }
 
-        // 4. 剩余短横线
         int remainingDash = 11 - usedDash;
-
-        // 5. 页码和短横线
         if (page == 1) {
             for (int i = 0; i < remainingDash; i++) url.append("-");
         } else {
@@ -107,23 +96,18 @@ public class NanGua extends Spider {
             for (int i = 0; i < afterDash; i++) url.append("-");
         }
 
-        // 6. 年份
-        if (!TextUtils.isEmpty(year)) {
-            url.append(year);
-        }
-
+        if (!TextUtils.isEmpty(year)) url.append(year);
         url.append(".html");
         return url.toString();
     }
 
     // ============================================================
-    // 提取视频列表
+    // 提取视频列表（★ 修复图片）
     // ============================================================
     private JSONArray extractList(String html) throws Exception {
         JSONArray list = new JSONArray();
         if (TextUtils.isEmpty(html)) return list;
 
-        // 用 Jsoup 解析 div.movie-list-item
         Document doc = Jsoup.parse(html);
         Elements items = doc.select("div.movie-list-item");
         for (Element item : items) {
@@ -132,39 +116,71 @@ public class NanGua extends Spider {
 
             String vodId = a.attr("href");
 
+            // 标题：优先 .movie-title 文本，去掉「影片信息」
             String title = item.select("div.movie-title").text().trim();
             if (TextUtils.isEmpty(title)) {
-                title = a.attr("title").replace("影片信息", "").trim();
-            } else {
-                title = title.replace("影片信息", "").trim();
+                Element titleEl = item.selectFirst(".movie-title");
+                if (titleEl != null) title = titleEl.attr("title");
             }
+            title = title.replace("影片信息", "").trim();
             if (TextUtils.isEmpty(title)) continue;
 
-            String pic = item.select("img").attr("data-original");
+            // ★★★ 图片：四级兜底 ★★★
+            String pic = "";
+
+            // 1. div.movie-post-lazyload 的 data-original（最优先）
+            Element picDiv = item.selectFirst("div.movie-post-lazyload");
+            if (picDiv != null) {
+                pic = picDiv.attr("data-original").trim();
+            }
+
+            // 2. 任何带 data-original 的元素
             if (TextUtils.isEmpty(pic)) {
-                // 尝试 background-image
-                Matcher m = Pattern.compile("background-image:\\s*url\\(([^)]+)\\)").matcher(item.outerHtml());
+                Element any = item.selectFirst("[data-original]");
+                if (any != null) pic = any.attr("data-original").trim();
+            }
+
+            // 3. 任何带 data-src 的元素
+            if (TextUtils.isEmpty(pic)) {
+                Element any = item.selectFirst("[data-src]");
+                if (any != null) pic = any.attr("data-src").trim();
+            }
+
+            // 4. background-image（处理 &quot; 和占位图）
+            if (TextUtils.isEmpty(pic)) {
+                Matcher m = bgImagePattern.matcher(item.outerHtml());
                 if (m.find()) {
-                    pic = m.group(1).trim().replaceAll("^['\"]|['\"]$", "");
-                    if (pic.contains("img-bj-k.png")) pic = "";
+                    pic = m.group(1).trim();
+                    pic = pic.replace("&quot;", "").replace("\"", "").replace("'", "").trim();
                 }
             }
+
+            // 5. img src
+            if (TextUtils.isEmpty(pic)) {
+                Element img = item.selectFirst("img[src]");
+                if (img != null) pic = img.attr("src").trim();
+            }
+
+            // 过滤占位图
+            if (pic.contains("img-bj-k.png")) pic = "";
+
+            // 清理 &quot; 等实体
+            pic = pic.replace("&quot;", "").replace("&amp;", "&").trim();
 
             JSONObject vod = new JSONObject();
             vod.put("vod_id", vodId);
             vod.put("vod_name", title);
-            vod.put("vod_pic", pic);
+            vod.put("vod_pic", fixUrl(pic));
             list.put(vod);
         }
         return list;
     }
 
     // ============================================================
-    // 提取分页
+    // 分页
     // ============================================================
     private int extractPageCount(String html) {
-        int pagecount = 1;
-        if (TextUtils.isEmpty(html)) return pagecount;
+        if (TextUtils.isEmpty(html)) return 1;
 
         Matcher m1 = pageDisplayPattern.matcher(html);
         if (m1.find()) {
@@ -175,21 +191,19 @@ public class NanGua extends Spider {
         if (m2.find()) {
             return parseIntSafe(m2.group(1), 1);
         }
-        return pagecount;
+        return 1;
     }
 
     // ============================================================
-    // 提取详情
+    // 详情
     // ============================================================
     private JSONObject extractDetail(String html, String vodId) throws Exception {
         JSONObject info = new JSONObject();
         info.put("vod_id", vodId);
 
-        // 标题 <title>《xxx》
         Matcher titleM = Pattern.compile("<title>《([^》]+)》").matcher(html);
         info.put("vod_name", titleM.find() ? titleM.group(1).trim() : "");
 
-        // meta 字段
         info.put("vod_class", metaContent(html, "og:video:class"));
         info.put("vod_area", metaContent(html, "og:video:area"));
         info.put("vod_lang", metaContent(html, "og:video:language"));
@@ -198,27 +212,20 @@ public class NanGua extends Spider {
         info.put("vod_pic", fixUrl(metaContent(html, "og:image")));
         info.put("vod_content", metaContent(html, "og:description"));
 
-        // 年份
         Matcher yearM = Pattern.compile("上映时间[：:]\\s*(\\d{4})").matcher(html);
         info.put("vod_year", yearM.find() ? yearM.group(1) : "");
 
-        // ========== 播放列表 ==========
+        // 播放列表
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
 
-        // 线路名：titleName
         List<String> fromNames = new ArrayList<>();
         Matcher nameM = Pattern.compile("<a[^>]*class=\"[^\"]*titleName[^\"]*\"[^>]*>([^<]+)</a>").matcher(html);
-        while (nameM.find()) {
-            fromNames.add(nameM.group(1).trim());
-        }
+        while (nameM.find()) fromNames.add(nameM.group(1).trim());
 
-        // 选集块：div#playsx（按大括号配对提取）
         List<String> playBlocks = extractDivBlocks(html, "playsx");
-
         for (int i = 0; i < playBlocks.size(); i++) {
-            String block = playBlocks.get(i);
-            Document blockDoc = Jsoup.parse(block);
+            Document blockDoc = Jsoup.parse(playBlocks.get(i));
             Elements eps = blockDoc.select("a[href]");
             if (eps.isEmpty()) continue;
 
@@ -243,18 +250,13 @@ public class NanGua extends Spider {
         return info;
     }
 
-    // ============================================================
-    // meta 提取
-    // ============================================================
     private String metaContent(String html, String property) {
         Matcher m = Pattern.compile(
                 "<meta[^>]*property=\"" + property + "\"[^>]*content=\"([^\"]+)\"").matcher(html);
         return m.find() ? m.group(1).trim() : "";
     }
 
-    // ============================================================
-    // 提取 div 块（按大括号配对）
-    // ============================================================
+    // 按大括号配对提取 div 块
     private List<String> extractDivBlocks(String html, String id) {
         List<String> result = new ArrayList<>();
         Matcher m = Pattern.compile("<div id=\"" + id + "\"[^>]*>").matcher(html);
@@ -273,15 +275,13 @@ public class NanGua extends Spider {
                     i++;
                 }
             }
-            if (depth == 0) {
-                result.add(html.substring(start, i));
-            }
+            if (depth == 0) result.add(html.substring(start, i));
         }
         return result;
     }
 
     // ============================================================
-    // 提取 m3u8
+    // m3u8 提取
     // ============================================================
     private String extractM3u8(String html) {
         if (TextUtils.isEmpty(html)) return null;
@@ -330,7 +330,6 @@ public class NanGua extends Spider {
         if (filter) {
             JSONObject filters = new JSONObject();
 
-            // 地区
             JSONArray areaValues = new JSONArray();
             areaValues.put(filterValue("全部地区", ""));
             String[][] areas = {{"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
@@ -339,21 +338,18 @@ public class NanGua extends Spider {
                     {"意大利", "意大利"}, {"西班牙", "西班牙"}, {"加拿大", "加拿大"}, {"其他", "其他"}};
             for (String[] a : areas) areaValues.put(filterValue(a[1], a[0]));
 
-            // 年份
             JSONArray yearValues = new JSONArray();
             yearValues.put(filterValue("全部年份", ""));
             for (int y = 2026; y >= 2010; y--) {
                 yearValues.put(filterValue(String.valueOf(y), String.valueOf(y)));
             }
 
-            // 排序
             JSONArray sortValues = new JSONArray();
             sortValues.put(filterValue("默认排序", ""));
             sortValues.put(filterValue("按时间", "time"));
             sortValues.put(filterValue("按人气", "hits"));
             sortValues.put(filterValue("按评分", "score"));
 
-            // 电影分类
             JSONArray movieClass = new JSONArray();
             movieClass.put(filterValue("电影", "1"));
             movieClass.put(filterValue("动作片", "6"));
@@ -365,7 +361,6 @@ public class NanGua extends Spider {
             movieClass.put(filterValue("战争片", "12"));
             movieClass.put(filterValue("纪录片", "24"));
 
-            // 电视剧分类
             JSONArray tvClass = new JSONArray();
             tvClass.put(filterValue("电视剧", "2"));
             tvClass.put(filterValue("美剧", "20"));
@@ -375,7 +370,6 @@ public class NanGua extends Spider {
             tvClass.put(filterValue("港剧", "16"));
             tvClass.put(filterValue("国产剧", "25"));
 
-            // 综艺 / 动漫 / 短剧
             JSONArray varietyClass = new JSONArray();
             varietyClass.put(filterValue("综艺", "3"));
 
@@ -385,7 +379,6 @@ public class NanGua extends Spider {
             JSONArray shortClass = new JSONArray();
             shortClass.put(filterValue("短剧", "26"));
 
-            // 组装
             JSONArray movieFilters = new JSONArray();
             movieFilters.put(filterGroup("class", "分类", movieClass));
             movieFilters.put(filterGroup("area", "地区", areaValues));
@@ -434,9 +427,7 @@ public class NanGua extends Spider {
             String html = OkHttp.string(API_HOST + "/");
             JSONArray list = extractList(html);
             JSONArray out = new JSONArray();
-            for (int i = 0; i < Math.min(list.length(), 12); i++) {
-                out.put(list.get(i));
-            }
+            for (int i = 0; i < Math.min(list.length(), 12); i++) out.put(list.get(i));
             result.put("list", out);
         } catch (Exception e) {
             SpiderDebug.log(e);
@@ -572,7 +563,7 @@ public class NanGua extends Spider {
     }
 
     // ============================================================
-    // 工具方法
+    // 工具
     // ============================================================
     private String fixUrl(String url) {
         if (TextUtils.isEmpty(url)) return "";
