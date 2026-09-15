@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
 /**
  * 毒舌电影 - www.dushehub.com
  * 结构参考 Dm84
- * header 用 JSONObject 对象
+ * 播放：能直连的直连，不能直连的走 v.dushe.online 代理
  */
 public class DuShe extends Spider {
 
@@ -70,21 +70,8 @@ public class DuShe extends Spider {
         return url;
     }
 
-    // ★ header 返回 JSONObject（对象）
-    private JSONObject headerJson() {
-        JSONObject h = new JSONObject();
-        try {
-            h.put("User-Agent", userAgent);
-            h.put("Referer", siteUrl + "/");
-            h.put("Accept", "*/*");
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-        }
-        return h;
-    }
-
     // ============================================================
-    // 列表解析（复用）
+    // 列表解析
     // ============================================================
     private JSONArray parseVodList(String url) throws Exception {
         String html = req(url);
@@ -260,8 +247,6 @@ public class DuShe extends Spider {
             if ("全部".equals(classType)) classType = "";
             if ("全部".equals(sort)) sort = "";
 
-            // 12 段，11 个 '-'
-            // [0]tid [1]area [2]sort [3]class [4-7]空 [8]page [9-10]空 [11]year
             String[] parts = new String[12];
             Arrays.fill(parts, "");
             parts[0] = tid;
@@ -320,7 +305,6 @@ public class DuShe extends Spider {
             content = doc.select("meta[name=description]").attr("content");
         }
 
-        // 线路/选集（按位置对齐）
         List<String> tabNames = new ArrayList<>();
         List<String> tabLineIds = new ArrayList<>();
         Elements tabItems = doc.select(".module-tab-item");
@@ -409,74 +393,86 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // 播放：抓 player_aaaa.url → parse:0，header 用对象
+    // 播放：能直连的直连，不能直连的走 v.dushe.online 代理
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         try {
+            // 1. id 本身是直链
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", id);
-                result.put("header", headerJson());   // ★ 对象
                 return result.toString();
             }
 
+            // 2. 抓播放页
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 1);
                 result.put("url", id);
-                result.put("header", headerJson());   // ★ 对象
                 return result.toString();
             }
 
+            // 3. player_aaaa
             Matcher pm = Pattern.compile("var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})").matcher(html);
             if (pm.find()) {
-                try {
-                    String raw = pm.group(1);
-                    raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
-                    raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
-                    raw = raw.replace("\\/", "/");
-                    raw = raw.replaceAll(",\\s*}", "}");
-                    JSONObject p = new JSONObject(raw);
-                    String url = p.optString("url", "");
-                    if (!TextUtils.isEmpty(url)) {
-                        SpiderDebug.log("player_aaaa url=" + url);
-                        JSONObject result = new JSONObject();
-                        result.put("parse", 0);
-                        result.put("url", cleanUrl(url));
-                        result.put("header", headerJson());   // ★ 对象
-                        return result.toString();
-                    }
-                } catch (Exception e) {
-                    SpiderDebug.log("player_aaaa parse error");
+                String raw = pm.group(1);
+                raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                raw = raw.replace("\\/", "/");
+                raw = raw.replaceAll(",\\s*}", "}");
+                JSONObject p = new JSONObject(raw);
+                String url = p.optString("url", "");
+                String from = p.optString("from", "");
+                String next = p.optString("link_next", "");
+                if (next.startsWith("/")) next = siteUrl + next;
+                String title = "";
+                JSONObject vd = p.optJSONObject("vod_data");
+                if (vd != null) title = vd.optString("vod_name", "");
+
+                JSONObject result = new JSONObject();
+
+                // ★ 能直连就直连
+                if (url.contains(".m3u8")) {
+                    SpiderDebug.log("直连 m3u8=" + url);
+                    result.put("parse", 0);
+                    result.put("url", cleanUrl(url));
+                } else {
+                    // ★ 不能直连的走代理
+                    String proxyUrl = "https://v.dushe.online/?url=" + URLEncoder.encode(url, "UTF-8")
+                            + "&next=" + URLEncoder.encode(next, "UTF-8")
+                            + "&tittle=" + URLEncoder.encode(title, "UTF-8")
+                            + "&t=" + URLEncoder.encode(from, "UTF-8")
+                            + "&d=v2";
+                    SpiderDebug.log("代理 url=" + proxyUrl);
+                    result.put("parse", 1);
+                    result.put("url", proxyUrl);
                 }
+                return result.toString();
             }
 
+            // 4. 兜底：正则抓 m3u8
             Matcher mm = Pattern.compile("(https?://[^\\s<>\"']+\\.m3u8[^\\s<>\"']*)").matcher(html);
             if (mm.find()) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", cleanUrl(mm.group(1)));
-                result.put("header", headerJson());   // ★ 对象
                 return result.toString();
             }
 
+            // 5. 最终兜底
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            result.put("header", headerJson());   // ★ 对象
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            try {
-                result.put("header", headerJson());
-            } catch (Exception ignored) {}
             return result.toString();
         }
     }
