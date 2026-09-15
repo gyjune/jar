@@ -108,6 +108,7 @@ public class BeiChuan extends Spider {
             if (TextUtils.isEmpty(name)) name = item.select("h4").text().trim();
 
             String pic = item.select("img").attr("data-original");
+            if (TextUtils.isEmpty(pic)) pic = a.attr("data-original");
             if (TextUtils.isEmpty(pic)) pic = item.select("img").attr("src");
             if (!TextUtils.isEmpty(pic) && pic.contains("/load")) pic = "";
 
@@ -130,31 +131,24 @@ public class BeiChuan extends Spider {
         JSONObject info = new JSONObject();
         info.put("vod_id", vodId);
 
-        // 名称
         Matcher titleM = Pattern.compile("<h3 class=\"title\">([^<]+)</h3>").matcher(html);
         info.put("vod_name", titleM.find() ? titleM.group(1).trim() : "");
 
-        // 图片
         Matcher picM = Pattern.compile("<img[^>]*class=\"img-responsive[^\"]*\"[^>]*data-original=\"([^\"]+)\"").matcher(html);
         info.put("vod_pic", picM.find() ? fixUrl(picM.group(1)) : "");
 
-        // 分类
         Matcher classM = Pattern.compile("<span class=\"text-muted hidden-xs\">类型：</span><a[^>]*>([^<]+)</a>").matcher(html);
         info.put("vod_class", classM.find() ? classM.group(1).trim() : "");
 
-        // 地区
         Matcher areaM = Pattern.compile("<span class=\"text-muted hidden-xs\">地区：</span>([^<]+)<span").matcher(html);
         info.put("vod_area", areaM.find() ? areaM.group(1).trim() : "");
 
-        // 年份
         Matcher yearM = Pattern.compile("<span class=\"text-muted hidden-xs\">年份：</span>(\\d{4})").matcher(html);
         info.put("vod_year", yearM.find() ? yearM.group(1) : "");
 
-        // 主演
         Matcher actorM = Pattern.compile("<span class=\"text-muted\">主演：</span>([\\s\\S]*?)</p>").matcher(html);
         if (actorM.find()) {
-            String block = actorM.group(1);
-            Matcher am = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(block);
+            Matcher am = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(actorM.group(1));
             StringBuilder sb = new StringBuilder();
             while (am.find()) {
                 if (sb.length() > 0) sb.append(" ");
@@ -165,11 +159,9 @@ public class BeiChuan extends Spider {
             info.put("vod_actor", "");
         }
 
-        // 导演
         Matcher directorM = Pattern.compile("<span class=\"text-muted\">导演：</span>([\\s\\S]*?)</p>").matcher(html);
         if (directorM.find()) {
-            String block = directorM.group(1);
-            Matcher dm = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(block);
+            Matcher dm = Pattern.compile("<a[^>]*>([^<]+)</a>").matcher(directorM.group(1));
             StringBuilder sb = new StringBuilder();
             while (dm.find()) {
                 if (sb.length() > 0) sb.append(" ");
@@ -180,7 +172,6 @@ public class BeiChuan extends Spider {
             info.put("vod_director", "");
         }
 
-        // 简介
         Matcher descM = Pattern.compile("<div class=\"stui-content__desc\">([\\s\\S]*?)</div>").matcher(html);
         if (descM.find()) {
             info.put("vod_content", cleanHtmlTags(descM.group(1)));
@@ -188,7 +179,6 @@ public class BeiChuan extends Spider {
             info.put("vod_content", "");
         }
 
-        // 播放列表
         String[] playResult = extractPlaylist(html);
         info.put("vod_play_from", playResult[0]);
         info.put("vod_play_url", playResult[1]);
@@ -197,22 +187,19 @@ public class BeiChuan extends Spider {
     }
 
     // ============================================================
-    // 播放列表提取（对应 JS extractPlaylist）
+    // 播放列表提取
     // ============================================================
     private String[] extractPlaylist(String html) {
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
 
-        // 1. 动态提取线路名
         List<String> foundNames = new ArrayList<>();
 
         // 方法1: card-item
         Matcher cardM = Pattern.compile("<div[^>]*class=\"[^\"]*card-item[^\"]*\"[^>]*>([^<]+)</div>").matcher(html);
         while (cardM.find()) {
             String name = cleanHtmlTags(cardM.group(1));
-            if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) {
-                foundNames.add(name);
-            }
+            if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) foundNames.add(name);
         }
 
         // 方法2: card-nav
@@ -222,14 +209,12 @@ public class BeiChuan extends Spider {
                 Matcher divM = Pattern.compile("<div[^>]*>([^<]+)</div>").matcher(navM.group(1));
                 while (divM.find()) {
                     String name = cleanHtmlTags(divM.group(1));
-                    if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) {
-                        foundNames.add(name);
-                    }
+                    if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) foundNames.add(name);
                 }
             }
         }
 
-        // 方法3: 隐藏 panel 里的 h3/strong
+        // 方法3: 隐藏 panel 的 h3/strong
         if (foundNames.isEmpty()) {
             Matcher panelM = Pattern.compile(
                     "<div class=\"stui-pannel stui-pannel-bg clearfix\" style=\"display: none;\">([\\s\\S]*?)</div>").matcher(html);
@@ -237,15 +222,12 @@ public class BeiChuan extends Spider {
                 String panel = panelM.group(1);
                 String name = "";
                 Matcher h3M = Pattern.compile("<h3[^>]*class=\"[^\"]*episode-tab[^\"]*\"[^>]*>([^<]+)</h3>").matcher(panel);
-                if (h3M.find()) {
-                    name = cleanHtmlTags(h3M.group(1));
-                } else {
+                if (h3M.find()) name = cleanHtmlTags(h3M.group(1));
+                else {
                     Matcher strongM = Pattern.compile("<strong[^>]*>([^<]+)</strong>").matcher(panel);
                     if (strongM.find()) name = cleanHtmlTags(strongM.group(1));
                 }
-                if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) {
-                    foundNames.add(name);
-                }
+                if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) foundNames.add(name);
             }
         }
 
@@ -254,29 +236,24 @@ public class BeiChuan extends Spider {
             Matcher textM = Pattern.compile("如果\\[\\s*([^\\]]+)\\s*\\]播放源失败").matcher(html);
             while (textM.find()) {
                 String name = cleanHtmlTags(textM.group(1));
-                if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) {
-                    foundNames.add(name);
-                }
+                if (!TextUtils.isEmpty(name) && !foundNames.contains(name)) foundNames.add(name);
             }
         }
 
         // 去重
         List<String> uniqueNames = new ArrayList<>();
         Set<String> set = new HashSet<>();
-        for (String name : foundNames) {
-            if (set.add(name)) uniqueNames.add(name);
-        }
+        for (String name : foundNames) if (set.add(name)) uniqueNames.add(name);
 
         SpiderDebug.log("提取到的线路名称: " + uniqueNames);
 
-        // 2. 提取所有播放列表
+        // 提取所有播放列表
         List<List<String[]>> allPlaylists = new ArrayList<>();
         Matcher ulM = Pattern.compile(
                 "<ul[^>]*class=\"[^\"]*stui-content__playlist[^\"]*\"[^>]*>([\\s\\S]*?)</ul>").matcher(html);
         while (ulM.find()) {
-            String ulHtml = ulM.group(1);
             List<String[]> eps = new ArrayList<>();
-            Matcher epM = Pattern.compile("<a[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>").matcher(ulHtml);
+            Matcher epM = Pattern.compile("<a[^>]*href=\"([^\"]+)\"[^>]*>([^<]+)</a>").matcher(ulM.group(1));
             while (epM.find()) {
                 String url = epM.group(1);
                 String name = epM.group(2).trim();
@@ -289,7 +266,6 @@ public class BeiChuan extends Spider {
 
         SpiderDebug.log("找到播放列表数量: " + allPlaylists.size());
 
-        // 3. 匹配线路名和播放列表
         int nameCount = uniqueNames.size();
         int playlistCount = allPlaylists.size();
 
@@ -300,7 +276,6 @@ public class BeiChuan extends Spider {
             if (i < nameCount) {
                 fromName = uniqueNames.get(i);
             } else {
-                // 从对应隐藏 panel 抓
                 String foundName = "";
                 Matcher panelM = Pattern.compile(
                         "<div class=\"stui-pannel stui-pannel-bg clearfix\" style=\"display: none;\">([\\s\\S]*?)</div>").matcher(html);
@@ -340,7 +315,6 @@ public class BeiChuan extends Spider {
             SpiderDebug.log("线路 " + (i + 1) + ": " + fromName + " -> " + eps.size() + "集");
         }
 
-        // 备用：完全没找到时，从隐藏 panel 里抓
         if (playFrom.isEmpty()) {
             Matcher panelM = Pattern.compile(
                     "<div class=\"stui-pannel stui-pannel-bg clearfix\" style=\"display: none;\">([\\s\\S]*?)</div>").matcher(html);
@@ -378,13 +352,9 @@ public class BeiChuan extends Spider {
     private String extractM3u8(String html) {
         if (TextUtils.isEmpty(html)) return null;
 
-        // var now = "..."
         Matcher nowM = nowPattern.matcher(html);
-        if (nowM.find() && nowM.group(1).contains(".m3u8")) {
-            return cleanUrl(nowM.group(1));
-        }
+        if (nowM.find() && nowM.group(1).contains(".m3u8")) return cleanUrl(nowM.group(1));
 
-        // player_aaaa
         Matcher pm = playerPattern.matcher(html);
         if (pm.find()) {
             try {
@@ -394,15 +364,12 @@ public class BeiChuan extends Spider {
                 raw = raw.replaceAll(",\\s*}", "}");
                 JSONObject p = new JSONObject(raw);
                 String url = p.optString("url", "");
-                if (!TextUtils.isEmpty(url) && url.contains(".m3u8")) {
-                    return cleanUrl(url);
-                }
+                if (!TextUtils.isEmpty(url) && url.contains(".m3u8")) return cleanUrl(url);
             } catch (Exception e) {
                 SpiderDebug.log("player_aaaa parse error");
             }
         }
 
-        // 正则直接抓
         Matcher mm = m3u8Pattern.matcher(html);
         if (mm.find()) return cleanUrl(mm.group(1));
         return null;
@@ -455,12 +422,11 @@ public class BeiChuan extends Spider {
     }
 
     // ============================================================
-    // buildFilters（按 JS 写死）
+    // buildFilters
     // ============================================================
     private JSONObject buildFilters() throws Exception {
         JSONObject filters = new JSONObject();
 
-        // 电影
         JSONArray movieFilters = new JSONArray();
         movieFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"动作片", "5068662235"}, {"爱情片", "5079945566"},
@@ -472,10 +438,9 @@ public class BeiChuan extends Spider {
                 {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
                 {"日本", "日本"}, {"韩国", "韩国"}, {"欧美", "欧美"}, {"泰国", "泰国"}, {"其他", "其他"}
         }));
-        movieFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2010, false)));
+        movieFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2010)));
         filters.put("5922692431", movieFilters);
 
-        // 连续剧
         JSONArray tvFilters = new JSONArray();
         tvFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"国产剧", "5141765353"}, {"港台剧", "5153048684"},
@@ -486,10 +451,9 @@ public class BeiChuan extends Spider {
                 {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
                 {"日本", "日本"}, {"韩国", "韩国"}, {"欧美", "欧美"}, {"泰国", "泰国"}
         }));
-        tvFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2020, false)));
+        tvFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2020)));
         filters.put("5033975762", tvFilters);
 
-        // 综艺
         JSONArray varietyFilters = new JSONArray();
         varietyFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"国产综艺", "6332494542"}, {"港台综艺", "6343777873"},
@@ -499,10 +463,9 @@ public class BeiChuan extends Spider {
                 {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"},
                 {"韩国", "韩国"}, {"日本", "日本"}, {"欧美", "欧美"}
         }));
-        varietyFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2023, false)));
+        varietyFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2023)));
         filters.put("5046095573", varietyFilters);
 
-        // 动漫
         JSONArray animeFilters = new JSONArray();
         animeFilters.put(filterGroup("class", "按分类", new String[][]{
                 {"全部", ""}, {"国产动漫", "6389747677"}, {"日韩动漫", "6392031008"},
@@ -512,23 +475,22 @@ public class BeiChuan extends Spider {
                 {"全部", ""}, {"大陆", "大陆"}, {"日本", "日本"},
                 {"欧美", "欧美"}, {"港台", "港台"}, {"其他", "其他"}
         }));
-        animeFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2023, false)));
+        animeFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2023)));
         filters.put("5057378904", animeFilters);
 
-        // 短剧
         JSONArray shortFilters = new JSONArray();
         shortFilters.put(filterGroup("area", "按地区", new String[][]{
                 {"全部", ""}, {"大陆", "大陆"}, {"香港", "香港"}, {"台湾", "台湾"}
         }));
-        shortFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2024, false)));
+        shortFilters.put(filterGroup("year", "按年份", buildYearValues(2026, 2024)));
         filters.put("5218091400", shortFilters);
 
         return filters;
     }
 
-    private String[][] buildYearValues(int from, int to, boolean includeEmpty) {
+    private String[][] buildYearValues(int from, int to) {
         List<String[]> list = new ArrayList<>();
-        if (includeEmpty) list.add(new String[]{"全部", ""});
+        list.add(new String[]{"全部", ""});
         for (int y = from; y >= to; y--) {
             list.add(new String[]{String.valueOf(y), String.valueOf(y)});
         }
@@ -536,7 +498,7 @@ public class BeiChuan extends Spider {
     }
 
     // ============================================================
-    // categoryContent
+    // ★ categoryContent（修复：把「全部」「不限」当空处理）
     // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
@@ -545,7 +507,18 @@ public class BeiChuan extends Spider {
             int page = parseIntSafe(pg, 1);
             String area = extend != null && extend.get("area") != null ? extend.get("area") : "";
             String year = extend != null && extend.get("year") != null ? extend.get("year") : "";
-            String cls = extend != null && extend.get("class") != null ? extend.get("class") : "";
+            String cls  = extend != null && extend.get("class") != null ? extend.get("class") : "";
+
+            // ★ 关键：把占位值当空处理
+            if ("全部".equals(area)) area = "";
+            if ("全部".equals(year)) year = "";
+            if ("全部".equals(cls)) cls = "";
+            if ("不限".equals(area)) area = "";
+            if ("不限".equals(year)) year = "";
+            if ("不限".equals(cls)) cls = "";
+
+            SpiderDebug.log("category tid=" + tid + " pg=" + pg
+                    + " cls=" + cls + " area=" + area + " year=" + year);
 
             String url = API_HOST + "/filter_sort/vod_list_" + tid;
             if (!TextUtils.isEmpty(cls)) {
@@ -567,7 +540,11 @@ public class BeiChuan extends Spider {
             SpiderDebug.log("category url: " + url);
 
             String html = OkHttp.string(url);
+            SpiderDebug.log("category html len=" + (html == null ? 0 : html.length()));
+
             JSONArray list = extractList(html);
+            SpiderDebug.log("category list size=" + list.length());
+
             int pagecount = extractPageCount(html);
 
             JSONObject result = new JSONObject();
@@ -594,9 +571,7 @@ public class BeiChuan extends Spider {
         int maxPage = 1;
 
         Matcher m1 = tailPagePattern.matcher(html);
-        if (m1.find()) {
-            maxPage = parseIntSafe(m1.group(1), 1);
-        }
+        if (m1.find()) maxPage = parseIntSafe(m1.group(1), 1);
 
         Matcher m2 = Pattern.compile("<a[^>]*href=\"[^\"]*-(\\d+)\\.html\"[^>]*>").matcher(html);
         while (m2.find()) {
@@ -666,7 +641,6 @@ public class BeiChuan extends Spider {
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         try {
-            // 1. id 是直链
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
@@ -676,7 +650,6 @@ public class BeiChuan extends Spider {
                 return result.toString();
             }
 
-            // 2. 抓播放页
             String html = OkHttp.string(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
@@ -686,7 +659,6 @@ public class BeiChuan extends Spider {
                 return result.toString();
             }
 
-            // 3. 提取 m3u8
             String videoUrl = extractM3u8(html);
             if (!TextUtils.isEmpty(videoUrl)) {
                 JSONObject result = new JSONObject();
@@ -696,7 +668,6 @@ public class BeiChuan extends Spider {
                 return result.toString();
             }
 
-            // 4. 抠 iframe
             Document doc = Jsoup.parse(html);
             String iframeSrc = doc.select("iframe").attr("src");
             if (!TextUtils.isEmpty(iframeSrc)) {
@@ -709,7 +680,6 @@ public class BeiChuan extends Spider {
                 return result.toString();
             }
 
-            // 5. 兜底
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
@@ -727,7 +697,7 @@ public class BeiChuan extends Spider {
     // ============================================================
     // 工具
     // ============================================================
-      private JSONObject filterGroup(String key, String name, String[][] values) throws Exception {
+    private JSONObject filterGroup(String key, String name, String[][] values) throws Exception {
         JSONObject obj = new JSONObject();
         obj.put("key", key);
         obj.put("name", name);
