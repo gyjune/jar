@@ -13,11 +13,13 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import java.net.URLDecoder;
 import java.net.URLEncoder;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -27,13 +29,15 @@ public class DuShe extends Spider {
     private static final String playProxy = "https://v.dushe.online";
 
     private static final Pattern playerPattern = Pattern.compile(
-            "var\\s+player_aaaa\\s*=\\s*(\\{.*?\\});", Pattern.DOTALL);
+            "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
     private static final Pattern directVideoPattern = Pattern.compile(
             "\\.(m3u8|mp4|flv|mkv|webm|ts)(\\?|$)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern tabNamePattern = Pattern.compile(
-            "<label class=\"module-tab-name\">\\s*<span[^>]*>([^<]+)</span>");
     private static final Pattern m3u8Pattern = Pattern.compile(
             "(https?://[^\\s\"'<>]+\\.m3u8[^\\s\"'<>]*)");
+    private static final Pattern lineIdPattern = Pattern.compile(
+            "/play/(\\d+)-(\\d+)-\\d+\\.html");
+    private static final Pattern tailPagePattern = Pattern.compile(
+            "(\\d+)---\\.html");
 
     // ============================================================
     // 首页：分类 + 筛选
@@ -56,7 +60,6 @@ public class DuShe extends Spider {
         if (filter) {
             JSONObject filters = new JSONObject();
 
-            // 地区
             JSONArray areaValues = new JSONArray();
             areaValues.put(filterValue("全部地区", ""));
             areaValues.put(filterValue("中国大陆", "中国大陆"));
@@ -71,21 +74,18 @@ public class DuShe extends Spider {
             areaValues.put(filterValue("泰国", "泰国"));
             areaValues.put(filterValue("印度", "印度"));
 
-            // 年份
             JSONArray yearValues = new JSONArray();
             yearValues.put(filterValue("全部年份", ""));
             for (int y = 2026; y >= 2015; y--) {
                 yearValues.put(filterValue(String.valueOf(y), String.valueOf(y)));
             }
 
-            // 排序
             JSONArray sortValues = new JSONArray();
             sortValues.put(filterValue("默认排序", ""));
             sortValues.put(filterValue("按时间", "time"));
             sortValues.put(filterValue("按人气", "hits"));
             sortValues.put(filterValue("按评分", "score"));
 
-            // 电影子分类
             JSONArray movieClass = new JSONArray();
             movieClass.put(filterValue("全部", ""));
             movieClass.put(filterValue("动作片", "dongzuo"));
@@ -97,7 +97,6 @@ public class DuShe extends Spider {
             movieClass.put(filterValue("战争片", "zhanzheng"));
             movieClass.put(filterValue("纪录片", "jilupian"));
 
-            // 电视剧子分类
             JSONArray tvClass = new JSONArray();
             tvClass.put(filterValue("全部", ""));
             tvClass.put(filterValue("国产剧", "guochan"));
@@ -107,14 +106,12 @@ public class DuShe extends Spider {
             tvClass.put(filterValue("泰剧", "taiju"));
             tvClass.put(filterValue("港剧", "gangju"));
 
-            // 综艺 / 动漫：只有"全部"
             JSONArray varietyClass = new JSONArray();
             varietyClass.put(filterValue("全部", ""));
 
             JSONArray animeClass = new JSONArray();
             animeClass.put(filterValue("全部", ""));
 
-            // 电影
             JSONArray movieFilters = new JSONArray();
             movieFilters.put(filterGroup("class", "分类", movieClass));
             movieFilters.put(filterGroup("area", "地区", areaValues));
@@ -122,7 +119,6 @@ public class DuShe extends Spider {
             movieFilters.put(filterGroup("sort", "排序", sortValues));
             filters.put("dianying", movieFilters);
 
-            // 电视剧
             JSONArray tvFilters = new JSONArray();
             tvFilters.put(filterGroup("class", "分类", tvClass));
             tvFilters.put(filterGroup("area", "地区", areaValues));
@@ -130,7 +126,6 @@ public class DuShe extends Spider {
             tvFilters.put(filterGroup("sort", "排序", sortValues));
             filters.put("dianshiju", tvFilters);
 
-            // 综艺
             JSONArray varietyFilters = new JSONArray();
             varietyFilters.put(filterGroup("class", "分类", varietyClass));
             varietyFilters.put(filterGroup("area", "地区", areaValues));
@@ -138,7 +133,6 @@ public class DuShe extends Spider {
             varietyFilters.put(filterGroup("sort", "排序", sortValues));
             filters.put("zongyi", varietyFilters);
 
-            // 动漫
             JSONArray animeFilters = new JSONArray();
             animeFilters.put(filterGroup("class", "分类", animeClass));
             animeFilters.put(filterGroup("area", "地区", areaValues));
@@ -214,7 +208,7 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // 详情
+    // 详情（方案 B：线路 ID 映射）
     // ============================================================
     @Override
     public String detailContent(List<String> ids) throws Exception {
@@ -226,24 +220,20 @@ public class DuShe extends Spider {
         JSONObject vod = new JSONObject();
         vod.put("vod_id", ids.get(0));
 
-        // 名称
         Element h1 = doc.selectFirst("h1");
         vod.put("vod_name", h1 != null ? h1.text().trim() : "");
 
-        // 图片
         String pic = doc.select(".module-info-img img").attr("data-original");
         if (TextUtils.isEmpty(pic)) pic = doc.select(".module-item-pic img").attr("data-original");
         if (TextUtils.isEmpty(pic)) pic = doc.select(".module-item-pic img").attr("data-src");
         vod.put("vod_pic", fixUrl(pic));
 
-        // 简介
         String content = doc.select(".module-info-introduction-content").text();
         if (TextUtils.isEmpty(content)) content = doc.select(".vod_content").text();
         if (TextUtils.isEmpty(content))
             content = doc.select("meta[name=description]").attr("content");
         vod.put("vod_content", content);
 
-        // 标签：年份 / 地区 / 分类
         Elements tags = doc.select(".module-info-tag-link a");
         StringBuilder classSb = new StringBuilder();
         for (Element tag : tags) {
@@ -260,49 +250,60 @@ public class DuShe extends Spider {
         }
         vod.put("vod_class", classSb.toString());
 
-        // 导演
-        String director = extractInfoItem(doc, "导演：");
+        String director = extractInfoItem(doc, "导演");
         if (!TextUtils.isEmpty(director)) vod.put("vod_director", director);
 
-        // 主演
-        String actor = extractInfoItem(doc, "主演：");
+        String actor = extractInfoItem(doc, "主演");
         if (!TextUtils.isEmpty(actor)) vod.put("vod_actor", actor);
 
-        // 播放列表
+        // ========== 方案 B：线路 ID 映射 ==========
+        // 1. 抓全部 tab，建 线路ID -> 线路名 映射
+        Map<String, String> lineIdToName = new LinkedHashMap<>();
+        Elements tabItems = doc.select(
+                "div.module-tab-items-box div.module-tab-item, " +
+                "div.module-tab-items-box a.module-tab-item");
+        if (tabItems.isEmpty()) {
+            tabItems = doc.select("div.module-tab-item, a.module-tab-item");
+        }
+        for (Element tab : tabItems) {
+            String name = tab.select("span").text().trim();
+            String lineId = extractLineId(tab.attr("href"));
+            if (TextUtils.isEmpty(lineId)) lineId = extractLineId(url);
+            if (!TextUtils.isEmpty(lineId) && !TextUtils.isEmpty(name)) {
+                if (!lineIdToName.containsKey(lineId)) {
+                    lineIdToName.put(lineId, name);
+                }
+            }
+        }
+        SpiderDebug.log("lineIdToName=" + lineIdToName);
+
+        // 2. 抓选集块，按块内链接的线路 ID 匹配名字
         StringBuilder playFrom = new StringBuilder();
         StringBuilder playUrl = new StringBuilder();
-
-        List<String> tabNames = new ArrayList<>();
-        Matcher tabMatcher = tabNamePattern.matcher(html);
-        while (tabMatcher.find()) tabNames.add(tabMatcher.group(1).trim());
-        if (tabNames.isEmpty()) {
-            Elements tabElements = doc.select("label.module-tab-name span");
-            if (tabElements.isEmpty()) tabElements = doc.select("div.module-tab-item span");
-            for (Element tab : tabElements) tabNames.add(tab.text().trim());
-        }
 
         Elements contents = doc.select("div.module-list.sort-list.tab-list");
         if (contents.isEmpty()) contents = doc.select("div.module-play-list-content");
 
-        int maxCount = Math.max(tabNames.size(), contents.size());
-        for (int i = 0; i < maxCount; i++) {
-            String tabName = i < tabNames.size() ? tabNames.get(i) : "线路" + (i + 1);
-            if (TextUtils.isEmpty(tabName)) tabName = "线路" + (i + 1);
-            if (playFrom.length() > 0) playFrom.append("$$$");
-            playFrom.append(tabName);
+        for (Element contentEl : contents) {
+            Elements links = contentEl.select("a.module-play-list-link");
+            if (links.isEmpty()) continue;
+
+            String lineId = extractLineId(links.first().attr("href"));
+            String lineName = lineIdToName.containsKey(lineId)
+                    ? lineIdToName.get(lineId) : "线路" + lineId;
 
             StringBuilder urls = new StringBuilder();
-            if (i < contents.size()) {
-                Elements links = contents.get(i).select("a.module-play-list-link");
-                for (Element link : links) {
-                    String epName = link.select("span").text();
-                    if (TextUtils.isEmpty(epName)) epName = link.attr("title");
-                    String epUrl = link.attr("href");
-                    if (epUrl.startsWith("/")) epUrl = siteUrl + epUrl;
-                    if (urls.length() > 0) urls.append("#");
-                    urls.append(epName).append("$").append(epUrl);
-                }
+            for (Element link : links) {
+                String epName = link.select("span").text().trim();
+                if (TextUtils.isEmpty(epName)) epName = link.attr("title");
+                String epUrl = link.attr("href");
+                if (epUrl.startsWith("/")) epUrl = siteUrl + epUrl;
+                if (urls.length() > 0) urls.append("#");
+                urls.append(epName).append("$").append(epUrl);
             }
+
+            if (playFrom.length() > 0) playFrom.append("$$$");
+            playFrom.append(lineName);
             if (playUrl.length() > 0) playUrl.append("$$$");
             playUrl.append(urls);
         }
@@ -322,7 +323,7 @@ public class DuShe extends Spider {
     // ============================================================
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
-        String url = siteUrl + "/search/" + URLEncoder.encode(key, "UTF-8") + "-------------.html";
+        String url = siteUrl + "/search/" + encode(key) + "-------------.html";
         SpiderDebug.log("search url: " + url);
 
         String html = OkHttp.string(url);
@@ -331,7 +332,6 @@ public class DuShe extends Spider {
         JSONObject result = new JSONObject();
         JSONArray list = new JSONArray();
 
-        // 搜索页用 module-card-item
         Elements items = doc.select("div.module-card-item.module-item");
         if (items.isEmpty()) items = doc.select("a.module-poster-item");
 
@@ -370,7 +370,6 @@ public class DuShe extends Spider {
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         JSONObject result = new JSONObject();
 
-        // 直链
         if (directVideoPattern.matcher(id).find()) {
             result.put("parse", 0);
             result.put("url", id);
@@ -408,6 +407,12 @@ public class DuShe extends Spider {
     // 工具方法
     // ============================================================
 
+    private String extractLineId(String url) {
+        if (TextUtils.isEmpty(url)) return "";
+        Matcher m = lineIdPattern.matcher(url);
+        return m.find() ? m.group(2) : "";
+    }
+
     private JSONObject parsePosterItem(Element item) throws Exception {
         String href = item.attr("href");
         if (TextUtils.isEmpty(href)) return null;
@@ -439,8 +444,7 @@ public class DuShe extends Spider {
             }
             for (Element a : doc.select("a")) {
                 if ("尾页".equals(a.text().trim())) {
-                    String href = a.attr("href");
-                    Matcher m = Pattern.compile("(\\d+)---\\.html").matcher(href);
+                    Matcher m = tailPagePattern.matcher(a.attr("href"));
                     if (m.find()) {
                         int n = parseIntSafe(m.group(1), 0);
                         if (n > maxPage) maxPage = n;
@@ -456,7 +460,7 @@ public class DuShe extends Spider {
     private String extractInfoItem(Document doc, String label) {
         try {
             for (Element span : doc.select("span.module-info-item-title")) {
-                if (span.text().contains(label.replace("：", ""))) {
+                if (span.text().contains(label)) {
                     Element content = span.nextElementSibling();
                     if (content != null) {
                         StringBuilder sb = new StringBuilder();
@@ -477,36 +481,69 @@ public class DuShe extends Spider {
 
     private boolean isArea(String tag) {
         String[] areas = {"中国大陆", "中国香港", "中国台湾", "美国", "韩国", "日本",
-                "英国", "法国", "泰国", "德国", "印度", "意大利", "西班牙", "加拿大", "澳大利亚"};
+                "英国", "法国", "泰国", "德国", "印度", "意大利", "西班牙", "加拿大", "澳大利亚",
+                "内地", "港台", "欧美", "其他"};
         for (String a : areas) if (a.equals(tag)) return true;
         return false;
     }
 
+    // ============================================================
+    // ★★★ 核心：播放地址提取（next 用 link_next）
+    // ============================================================
     private String extractPlayUrl(String html) {
         try {
             Matcher matcher = playerPattern.matcher(html);
             if (matcher.find()) {
-                JSONObject playerJson = new JSONObject(matcher.group(1));
-                String url = playerJson.optString("url", "");
-                String next = playerJson.optString("link_next", "");
-                String from = playerJson.optString("from", "");
+                String raw = matcher.group(1);
+                // 手动修成合法 JSON
+                raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                raw = raw.replace("\\/", "/");
+                raw = raw.replaceAll(",\\s*}", "}");
+
+                JSONObject p = new JSONObject(raw);
+                String url = p.optString("url", "");
+
+                // ★★★ 关键：next 用 link_next，并补全为绝对地址
+                String next = p.optString("link_next", "");
+                if (!TextUtils.isEmpty(next) && next.startsWith("/")) {
+                    next = siteUrl + next;
+                }
+
+                String from = p.optString("from", "");
                 String title = "";
-                JSONObject vodData = playerJson.optJSONObject("vod_data");
-                if (vodData != null) title = vodData.optString("vod_name", "");
+                JSONObject vd = p.optJSONObject("vod_data");
+                if (vd != null) title = vd.optString("vod_name", "");
+
+                SpiderDebug.log("player url=" + url + " next=" + next
+                        + " from=" + from + " title=" + title);
 
                 if (!TextUtils.isEmpty(url)) {
-                    return playProxy + "/?url=" + URLEncoder.encode(url, "UTF-8")
-                            + "&next=" + URLEncoder.encode(next, "UTF-8")
-                            + "&tittle=" + URLEncoder.encode(title, "UTF-8")
-                            + "&t=" + URLEncoder.encode(from, "UTF-8")
+                    String finalUrl = playProxy + "/?url=" + encode(url)
+                            + "&next=" + encode(next)
+                            + "&tittle=" + encode(title)
+                            + "&t=" + encode(from)
                             + "&d=v2";
+                    SpiderDebug.log("proxy final=" + finalUrl);
+                    return finalUrl;
                 }
             }
 
+            // 兜底 1：iframe
             Document doc = Jsoup.parse(html);
             String iframeSrc = doc.select(".MacPlayer iframe").attr("src");
-            if (!TextUtils.isEmpty(iframeSrc)) return fixUrl(iframeSrc);
+            if (TextUtils.isEmpty(iframeSrc)) iframeSrc = doc.select("iframe").attr("src");
+            if (!TextUtils.isEmpty(iframeSrc)) {
+                if (iframeSrc.contains("v.dushe.online")) return fixUrl(iframeSrc);
+                Matcher um = Pattern.compile("[?&]url=([^&]+)").matcher(iframeSrc);
+                if (um.find()) {
+                    String decoded = URLDecoder.decode(um.group(1), "UTF-8");
+                    return playProxy + "/?url=" + encode(decoded) + "&d=v2";
+                }
+                return fixUrl(iframeSrc);
+            }
 
+            // 兜底 2：页面直接嵌 m3u8
             Matcher m3u8Matcher = m3u8Pattern.matcher(html);
             if (m3u8Matcher.find()) return m3u8Matcher.group(1);
         } catch (Exception e) {
@@ -559,6 +596,19 @@ public class DuShe extends Spider {
         if (url.startsWith("http")) return url;
         if (url.startsWith("/")) return siteUrl + url;
         return siteUrl + "/" + url;
+    }
+
+    // 和 JS encodeURIComponent 行为一致的编码
+    private String encode(String s) {
+        if (s == null) return "";
+        try {
+            return URLEncoder.encode(s, "UTF-8")
+                    .replace("+", "%20")
+                    .replace("*", "%2A")
+                    .replace("%7E", "~");
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     private int parseIntSafe(String s, int def) {
