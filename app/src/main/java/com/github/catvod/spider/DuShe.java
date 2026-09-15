@@ -47,7 +47,7 @@ public class DuShe extends Spider {
     }
 
     /**
-     * m3u8 源的 header，Referer 用源自己的域名（更抗防盗链）
+     * m3u8 源的 header，Referer 用源自己的域名
      */
     private Map<String, String> getM3U8Header(String m3u8Url) {
         Map<String, String> header = new HashMap<>();
@@ -102,27 +102,6 @@ public class DuShe extends Spider {
         } catch (Exception e) {
             return s;
         }
-    }
-
-    /**
-     * 把 \uXXXX 转义还原成中文
-     */
-    private String decodeUnicode(String s) {
-        if (s == null || s.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        Matcher m = Pattern.compile("\\\\u([0-9a-fA-F]{4})").matcher(s);
-        int last = 0;
-        while (m.find()) {
-            sb.append(s, last, m.start());
-            try {
-                sb.append((char) Integer.parseInt(m.group(1), 16));
-            } catch (Exception e) {
-                sb.append(m.group());
-            }
-            last = m.end();
-        }
-        sb.append(s.substring(last));
-        return sb.toString();
     }
 
     // ============================================================
@@ -310,15 +289,12 @@ public class DuShe extends Spider {
         info.put("vod_play_from", "");
         info.put("vod_play_url", "");
 
-        // 标题
         String title = find("<h1>([^<]+)</h1>", html);
         if (!title.isEmpty()) info.put("vod_name", title);
 
-        // 海报
         String pic = find("<div class=\"module-item-pic\">\\s*<img[^>]*data-original=\"([^\"]+)\"", html);
         if (!pic.isEmpty()) info.put("vod_pic", fixUrl(pic));
 
-        // 标签：年份 / 地区 / 分类
         List<String> tags = new ArrayList<>();
         Matcher tm = Pattern.compile(
                 "<div class=\"module-info-tag-link\">\\s*<a[^>]*>([^<]+)</a>\\s*</div>").matcher(html);
@@ -340,12 +316,10 @@ public class DuShe extends Spider {
         }
         info.put("vod_class", classSb.toString());
 
-        // 简介
         String desc = find(
                 "<div class=\"module-info-introduction-content\">\\s*<p>([^<]+)</p>", html);
         if (!desc.isEmpty()) info.put("vod_content", desc);
 
-        // 导演
         String directorBlock = find(
                 "<span class=\"module-info-item-title\">导演：</span>\\s*<div class=\"module-info-item-content\">\\s*(.*?)</div>",
                 html);
@@ -356,7 +330,6 @@ public class DuShe extends Spider {
             info.put("vod_director", TextUtils.join("/", dirs));
         }
 
-        // 主演
         String actorBlock = find(
                 "<span class=\"module-info-item-title\">主演：</span>\\s*<div class=\"module-info-item-content\">\\s*(.*?)</div>",
                 html);
@@ -367,7 +340,7 @@ public class DuShe extends Spider {
             info.put("vod_actor", TextUtils.join("/", actors));
         }
 
-        // ====== 线路名 + 集数（分两步抓） ======
+        // 线路名 + 集数
         List<String> cleanFromNames = new ArrayList<>();
         Matcher fnm = Pattern.compile(
                 "<div[^>]*class=\"[^\"]*module-tab-item[^\"]*\"[^>]*>.*?</div>",
@@ -392,16 +365,12 @@ public class DuShe extends Spider {
 
             cleanFromNames.add(count.isEmpty() ? name : name + "[" + count + "]");
         }
-        System.out.println("fromNames = " + cleanFromNames);
 
-        // ====== 播放列表 ======
         List<String> playBlocks = new ArrayList<>();
         Matcher pbm = Pattern.compile(
                 "<div[^>]*id=\"panel\\d+\"[^>]*>\\s*<div class=\"module-play-list\">\\s*<div class=\"module-play-list-content[^\"]*\">(.*?)</div>\\s*</div>\\s*</div>",
                 Pattern.DOTALL).matcher(html);
         while (pbm.find()) playBlocks.add(pbm.group(1));
-
-        System.out.println("playBlocks size = " + playBlocks.size());
 
         List<String> playFrom = new ArrayList<>();
         List<String> playUrl = new ArrayList<>();
@@ -433,47 +402,35 @@ public class DuShe extends Spider {
 
     // ============================================================
     // 提取播放地址
-    // 优先级：
-    //   1. player_aaaa 里的 "url" 字段是 m3u8 → 直接返回裸 m3u8
-    //   2. iframe 是 v.dushe.online 代理页 → 返回代理地址
-    //   3. 全局找 m3u8
-    //   4. 任意 iframe
     // ============================================================
 
     private String extractPlayUrl(String html) {
         if (html == null || html.isEmpty()) return null;
 
-        // 第一步：player_aaaa 里的 "url" 字段
+        // 1. player_aaaa 里的 "url" 字段
         String m3u8Url = extractM3u8FromPlayerAaaa(html);
         if (m3u8Url != null && !m3u8Url.isEmpty()) {
-            System.out.println("player_aaaa m3u8 = " + m3u8Url);
             return m3u8Url;
         }
 
-        // 第二步：iframe 里的 v.dushe.online 代理页
+        // 2. iframe 里的 v.dushe.online 代理页
         Matcher ifm = Pattern.compile(
                 "<iframe[^>]*src=\"(https://v\\.dushe\\.online/\\?[^\"]+)\"").matcher(html);
         if (ifm.find()) {
-            String proxyUrl = ifm.group(1).replace("&amp;", "&");
-            System.out.println("iframe proxyUrl = " + proxyUrl);
-            return proxyUrl;
+            return ifm.group(1).replace("&amp;", "&");
         }
 
-        // 第三步：全局找 m3u8
+        // 3. 全局找 m3u8
         Matcher mm = Pattern.compile(
                 "(https?://[^\\s\"'<>\\\\]+\\.m3u8[^\\s\"'<>\\\\]*)").matcher(html);
         if (mm.find()) {
-            String url = mm.group(1).replace("\\/", "/");
-            System.out.println("global m3u8 = " + url);
-            return url;
+            return mm.group(1).replace("\\/", "/");
         }
 
-        // 第四步：任意 iframe
+        // 4. 任意 iframe
         Matcher ifm2 = Pattern.compile("<iframe[^>]*src=\"([^\"]+)\"[^>]*>").matcher(html);
         if (ifm2.find()) {
-            String src = ifm2.group(1).replace("&amp;", "&");
-            System.out.println("any iframe = " + src);
-            return src;
+            return ifm2.group(1).replace("&amp;", "&");
         }
 
         return null;
@@ -481,11 +438,8 @@ public class DuShe extends Spider {
 
     /**
      * 从 player_aaaa 里抓 url 字段
-     * 要求：必须出现在 player_aaaa 脚本块内，且值以 .m3u8 结尾
-     * 不依赖 JSON 完整性
      */
     private String extractM3u8FromPlayerAaaa(String html) {
-        // 定位 player_aaaa 块，到 </script> 或下一个 <script 为止
         Matcher block = Pattern.compile(
                 "var\\s+player_aaaa\\s*=\\s*(\\{.*?})(?=\\s*</script>|\\s*<script)",
                 Pattern.DOTALL).matcher(html);
@@ -494,7 +448,6 @@ public class DuShe extends Spider {
         if (block.find()) {
             scope = block.group(1);
         } else {
-            // fallback：从 player_aaaa 到第一个 }
             Matcher block2 = Pattern.compile(
                     "var\\s+player_aaaa\\s*=\\s*(\\{.*?\\})",
                     Pattern.DOTALL).matcher(html);
@@ -503,7 +456,6 @@ public class DuShe extends Spider {
 
         if (scope == null || scope.isEmpty()) return null;
 
-        // 在 player_aaaa 范围内抓 "url":"..."
         Matcher um = Pattern.compile("\"url\"\\s*:\\s*\"([^\"]+?)\"").matcher(scope);
         if (um.find()) {
             String url = um.group(1).replace("\\/", "/");
@@ -729,13 +681,7 @@ public class DuShe extends Spider {
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        System.out.println("=== playerContent ===");
-        System.out.println("flag = " + flag);
-        System.out.println("id = " + id);
-
-        // 已经是媒体文件
         if (id != null && id.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
-            System.out.println("direct media file");
             JSONObject result = new JSONObject();
             result.put("parse", 0);
             result.put("url", id);
@@ -744,9 +690,7 @@ public class DuShe extends Spider {
         }
 
         String html = req(id);
-        System.out.println("html length = " + html.length());
         if (html.isEmpty()) {
-            System.out.println("html empty!");
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
@@ -755,34 +699,27 @@ public class DuShe extends Spider {
         }
 
         String playUrl = extractPlayUrl(html);
-        System.out.println("playUrl = " + playUrl);
 
         JSONObject result = new JSONObject();
         if (playUrl == null) {
-            // 都没抓到，交给 TVBox 解析器兜底
             result.put("parse", 1);
             result.put("url", id);
             result.put("header", new JSONObject(getHeader()).toString());
         } else if (playUrl.matches("(?i).*\\.(m3u8|mp4|flv|mkv|webm|ts).*")) {
-            // 裸 m3u8 → parse=0，直接播
             result.put("parse", 0);
             result.put("url", playUrl);
             result.put("header", new JSONObject(getM3U8Header(playUrl)).toString());
         } else if (playUrl.contains("v.dushe.online")) {
-            // 代理页面 → parse=1，交给 TVBox 解析器
             result.put("parse", 1);
             result.put("url", playUrl);
             Map<String, String> h = getHeader();
             h.put("Referer", API_HOST + "/");
             result.put("header", new JSONObject(h).toString());
         } else {
-            // 其他网页 → parse=1
             result.put("parse", 1);
             result.put("url", playUrl);
             result.put("header", new JSONObject(getHeader()).toString());
         }
-
-        System.out.println("playerContent result = " + result);
         return result.toString();
     }
 }
