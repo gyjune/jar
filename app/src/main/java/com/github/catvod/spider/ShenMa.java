@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * 神马影院 - www.smyyok.com
- * header 只含 User-Agent（照旺旺）
+ * 严格按官方 wiki：playerContent 只返回 {"url":"..."}
  */
 public class ShenMa extends Spider {
 
@@ -45,27 +45,6 @@ public class ShenMa extends Spider {
         header.put("User-Agent", userAgent);
         header.put("Referer", siteUrl + "/");
         return header;
-    }
-
-    // ★ 只含 User-Agent（照旺旺）
-    private String headers() {
-        try {
-            JSONObject h = new JSONObject();
-            h.put("User-Agent", userAgent);
-            return h.toString();
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private String m3u8Headers() {
-        try {
-            JSONObject h = new JSONObject();
-            h.put("User-Agent", userAgent);
-            return h.toString();
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private String req(String url) {
@@ -461,7 +440,7 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（header 只含 User-Agent）
+    // ★ playerContent（只返回 {"url":"..."}）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -469,18 +448,14 @@ public class ShenMa extends Spider {
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
-                result.put("parse", 0);
                 result.put("url", id);
-                result.put("header", m3u8Headers());
                 return result.toString();
             }
 
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
-                result.put("parse", 1);
                 result.put("url", id);
-                result.put("header", headers());
                 return result.toString();
             }
 
@@ -488,21 +463,16 @@ public class ShenMa extends Spider {
             if (!TextUtils.isEmpty(videoUrl)) {
                 SpiderDebug.log("direct m3u8=" + videoUrl);
                 JSONObject result = new JSONObject();
-                result.put("parse", 0);
                 result.put("url", videoUrl);
-                result.put("header", m3u8Headers());
                 return result.toString();
             }
 
             JSONObject result = new JSONObject();
-            result.put("parse", 1);
             result.put("url", id);
-            result.put("header", headers());
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
-            result.put("parse", 1);
             result.put("url", id);
             return result.toString();
         }
