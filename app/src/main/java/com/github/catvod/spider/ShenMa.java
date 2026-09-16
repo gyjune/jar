@@ -2,7 +2,6 @@ package com.github.catvod.spider;
 
 import android.text.TextUtils;
 
-import com.github.catvod.bean.Result;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
@@ -26,7 +25,7 @@ import java.util.regex.Pattern;
 /**
  * 神马影院 - www.smyyok.com
  * 严格按猫影视 / TVBox 官方规范
- * playerContent 只返回 Result.get().url(url).string()
+ * playerContent 只返回 {"url":"..."}
  */
 public class ShenMa extends Spider {
 
@@ -378,7 +377,6 @@ public class ShenMa extends Spider {
                 "<img[^>]*class=\"lazy lazy1 mask-1\"[^>]*data-src=\"([^\"]+)\"[^>]*>").matcher(html);
         info.put("vod_pic", picM.find() ? fixUrl(picM.group(1)) : "");
 
-        // 线路/选集
         List<String> names = new ArrayList<>();
         Matcher tabM = Pattern.compile(
                 "<a[^>]*class=\"swiper-slide[^\"]*\"[^>]*>\\s*<i[^>]*></i>&nbsp;([^<]+?)(?:<span[^>]*>\\d+</span>)?</a>").matcher(html);
@@ -443,32 +441,42 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（严格按官方规范：只返回 url）
-    // 神马所有线路 url 都是 m3u8，直接返回
+    // ★ playerContent（只返回 {"url":"..."}）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        // 1. id 本身是直链
-        if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
-                Pattern.CASE_INSENSITIVE).matcher(id).find()) {
-            return Result.get().url(id).string();
-        }
+        try {
+            if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
+                    Pattern.CASE_INSENSITIVE).matcher(id).find()) {
+                JSONObject result = new JSONObject();
+                result.put("url", id);
+                return result.toString();
+            }
 
-        // 2. 抓播放页
-        String html = req(id);
-        if (TextUtils.isEmpty(html)) {
-            return Result.get().url(id).string();
-        }
+            String html = req(id);
+            if (TextUtils.isEmpty(html)) {
+                JSONObject result = new JSONObject();
+                result.put("url", id);
+                return result.toString();
+            }
 
-        // 3. 提取 m3u8
-        String videoUrl = extractM3u8(html);
-        if (!TextUtils.isEmpty(videoUrl)) {
-            SpiderDebug.log("direct m3u8=" + videoUrl);
-            return Result.get().url(videoUrl).string();
-        }
+            String videoUrl = extractM3u8(html);
+            if (!TextUtils.isEmpty(videoUrl)) {
+                SpiderDebug.log("direct m3u8=" + videoUrl);
+                JSONObject result = new JSONObject();
+                result.put("url", videoUrl);
+                return result.toString();
+            }
 
-        // 4. 兜底
-        return Result.get().url(id).string();
+            JSONObject result = new JSONObject();
+            result.put("url", id);
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+            JSONObject result = new JSONObject();
+            result.put("url", id);
+            return result.toString();
+        }
     }
 
     // ============================================================
