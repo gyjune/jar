@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * 神马影院 - www.smyyok.com
- * playerContent 返回 {"parse":0/1, "url":"...", "jx":0/1}
+ * playerContent 返回 {"parse":0/1, "url":"...", "header":{...}}
  */
 public class ShenMa extends Spider {
 
@@ -416,17 +416,21 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（带 jx）
+    // ★ playerContent（parse + url + header 对象）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         try {
+            JSONObject headerObj = new JSONObject();
+            headerObj.put("User-Agent", userAgent);
+            headerObj.put("Referer", siteUrl + "/");
+
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", id);
-                result.put("jx", 0);
+                result.put("header", headerObj);
                 return result.toString();
             }
 
@@ -435,7 +439,7 @@ public class ShenMa extends Spider {
                 JSONObject result = new JSONObject();
                 result.put("parse", 1);
                 result.put("url", id);
-                result.put("jx", 1);
+                result.put("header", headerObj);
                 return result.toString();
             }
 
@@ -445,21 +449,20 @@ public class ShenMa extends Spider {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", videoUrl);
-                result.put("jx", 0);
+                result.put("header", headerObj);
                 return result.toString();
             }
 
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            result.put("jx", 1);
+            result.put("header", headerObj);
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", id);
-            result.put("jx", 1);
             return result.toString();
         }
     }
