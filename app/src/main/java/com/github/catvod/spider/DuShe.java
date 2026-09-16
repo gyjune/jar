@@ -24,8 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * 毒舌电影 - www.dushehub.com
- * 严格按猫影视 / TVBox 官方规范
- * playerContent 只返回 {"url":"..."}
+ * playerContent 返回 {"parse":0/1, "url":"...", "jx":0/1}
  */
 public class DuShe extends Spider {
 
@@ -38,9 +37,6 @@ public class DuShe extends Spider {
     private static final Pattern playerPattern = Pattern.compile(
             "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
 
-    // ============================================================
-    // header
-    // ============================================================
     private Map<String, String> getHeader() {
         Map<String, String> header = new HashMap<>();
         header.put("User-Agent", userAgent);
@@ -318,7 +314,7 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（只返回 {"url":"..."}）
+    // ★ playerContent（带 jx）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -326,14 +322,18 @@ public class DuShe extends Spider {
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 0);
                 result.put("url", id);
+                result.put("jx", 0);
                 return result.toString();
             }
 
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 1);
                 result.put("url", id);
+                result.put("jx", 1);
                 return result.toString();
             }
 
@@ -364,14 +364,18 @@ public class DuShe extends Spider {
 
             if (TextUtils.isEmpty(realUrl)) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 1);
                 result.put("url", id);
+                result.put("jx", 1);
                 return result.toString();
             }
 
             if (realUrl.contains(".m3u8") || realUrl.contains(".mp4")) {
                 SpiderDebug.log("direct m3u8=" + realUrl);
                 JSONObject result = new JSONObject();
+                result.put("parse", 0);
                 result.put("url", realUrl);
+                result.put("jx", 0);
                 return result.toString();
             }
 
@@ -382,12 +386,16 @@ public class DuShe extends Spider {
                     + "&d=v2";
             SpiderDebug.log("proxy=" + proxyUrl);
             JSONObject result = new JSONObject();
+            result.put("parse", 1);
             result.put("url", proxyUrl);
+            result.put("jx", 1);
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
+            result.put("parse", 1);
             result.put("url", id);
+            result.put("jx", 1);
             return result.toString();
         }
     }
