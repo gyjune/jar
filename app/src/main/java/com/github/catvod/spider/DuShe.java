@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * 毒舌电影 - www.dushehub.com
- * playerContent 返回 {"parse":0/1, "url":"...", "header":{...}}
+ * header 用字符串（照南瓜）
  */
 public class DuShe extends Spider {
 
@@ -37,11 +37,39 @@ public class DuShe extends Spider {
     private static final Pattern playerPattern = Pattern.compile(
             "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
 
+    // ============================================================
+    // header
+    // ============================================================
     private Map<String, String> getHeader() {
         Map<String, String> header = new HashMap<>();
         header.put("User-Agent", userAgent);
         header.put("Referer", siteUrl + "/");
         return header;
+    }
+
+    private String headers() {
+        try {
+            JSONObject h = new JSONObject();
+            h.put("User-Agent", userAgent);
+            h.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            h.put("Accept-Language", "zh-CN,zh;q=0.9");
+            h.put("Referer", siteUrl + "/");
+            return h.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String m3u8Headers() {
+        try {
+            JSONObject h = new JSONObject();
+            h.put("User-Agent", userAgent);
+            h.put("Referer", siteUrl + "/");
+            h.put("Accept", "*/*");
+            return h.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private String req(String url) {
@@ -314,37 +342,29 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（parse + url + header 对象）
+    // ★ playerContent（header 用字符串，照南瓜）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         try {
-            // 统一构造 header 对象
-            JSONObject headerObj = new JSONObject();
-            headerObj.put("User-Agent", userAgent);
-            headerObj.put("Referer", siteUrl + "/");
-
-            // 1. id 本身是直链
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", id);
-                result.put("header", headerObj);
+                result.put("header", m3u8Headers());   // ★ 字符串
                 return result.toString();
             }
 
-            // 2. 抓播放页
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
                 result.put("parse", 1);
                 result.put("url", id);
-                result.put("header", headerObj);
+                result.put("header", headers());   // ★ 字符串
                 return result.toString();
             }
 
-            // 3. 抠 player_aaaa
             String realUrl = "";
             String from = "";
             String next = "";
@@ -374,21 +394,19 @@ public class DuShe extends Spider {
                 JSONObject result = new JSONObject();
                 result.put("parse", 1);
                 result.put("url", id);
-                result.put("header", headerObj);
+                result.put("header", headers());   // ★ 字符串
                 return result.toString();
             }
 
-            // 4. m3u8 直连 → parse:0
             if (realUrl.contains(".m3u8") || realUrl.contains(".mp4")) {
                 SpiderDebug.log("direct m3u8=" + realUrl);
                 JSONObject result = new JSONObject();
                 result.put("parse", 0);
                 result.put("url", realUrl);
-                result.put("header", headerObj);
+                result.put("header", m3u8Headers());   // ★ 字符串
                 return result.toString();
             }
 
-            // 5. 不是 m3u8 → 走代理，parse:1
             String proxyUrl = "https://v.dushe.online/?url=" + URLEncoder.encode(realUrl, "UTF-8")
                     + "&next=" + URLEncoder.encode(next, "UTF-8")
                     + "&tittle=" + URLEncoder.encode(title, "UTF-8")
@@ -398,7 +416,7 @@ public class DuShe extends Spider {
             JSONObject result = new JSONObject();
             result.put("parse", 1);
             result.put("url", proxyUrl);
-            result.put("header", headerObj);
+            result.put("header", headers());   // ★ 字符串
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
