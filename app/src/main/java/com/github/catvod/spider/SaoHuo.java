@@ -29,9 +29,10 @@ import okhttp3.Response;
 
 /**
  * 骚火影视 SaoHuo
- * 参考反编译版逻辑重写：
- *  - 分类URL: /list/{cateId}-{page}.html
- *  - cookie: 从首页响应头 set-cookie 获取
+ * 参考反编译版逻辑：
+ *  - 分类 URL: /list/{cateId}-{page}.html
+ *  - cookie: 从首页 Set-Cookie 获取
+ *  - 播放: 取 iframe.src, parse=1 交给嗅探器
  */
 public class SaoHuo extends Spider {
 
@@ -74,25 +75,6 @@ public class SaoHuo extends Spider {
         }
     }
 
-    private String postJson(String url, JSONObject body, String referer) {
-        try {
-            RequestBody rb = RequestBody.create(
-                    MediaType.parse("application/json; charset=utf-8"),
-                    body.toString());
-            Request.Builder builder = new Request.Builder().url(url).post(rb);
-            Map<String, String> h = headers();
-            h.put("Content-Type", "application/json; charset=utf-8");
-            if (!TextUtils.isEmpty(referer)) h.put("Referer", referer);
-            for (Map.Entry<String, String> e : h.entrySet()) {
-                builder.addHeader(e.getKey(), e.getValue());
-            }
-            return execute(builder.build());
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /** 执行请求 + 读 body + 更新 cookie */
     private String execute(Request request) {
         Response response = null;
         try {
@@ -106,9 +88,7 @@ public class SaoHuo extends Spider {
                     int end = c.indexOf(';');
                     if (end > 0) c = c.substring(0, end);
                     int eq = c.indexOf('=');
-                    if (eq > 0) {
-                        map.put(c.substring(0, eq).trim(), c.substring(eq + 1).trim());
-                    }
+                    if (eq > 0) map.put(c.substring(0, eq).trim(), c.substring(eq + 1).trim());
                 }
                 cookie = joinCookie(map);
             }
@@ -149,7 +129,6 @@ public class SaoHuo extends Spider {
     public void init(Context context, String extend) throws Exception {
         super.init(context, extend);
         if (!TextUtils.isEmpty(extend)) host = extend.trim();
-        // 先请求一次首页，拿到 cookie
         request(host);
     }
 
@@ -157,7 +136,6 @@ public class SaoHuo extends Spider {
 
     @Override
     public String homeContent(boolean filter) throws Exception {
-        // ★ 确保 cookie 已拿到
         if (TextUtils.isEmpty(cookie)) request(host);
 
         JSONArray classes = new JSONArray();
@@ -294,23 +272,11 @@ public class SaoHuo extends Spider {
         String cateId = (extend != null && !TextUtils.isEmpty(extend.get("cateId")))
                 ? extend.get("cateId") : tid;
 
-        // ★ 关键改动：/list/{cateId}-{page}.html，第1页也带 -1
         String url = host + String.format("/list/%s-%s.html", cateId, page);
 
-        android.util.Log.d("SaoHuo", ">>> url=" + url);
-        android.util.Log.d("SaoHuo", ">>> cookie=" + cookie);
-
         String html = request(url);
-
-        android.util.Log.d("SaoHuo", ">>> len=" + (html == null ? 0 : html.length()));
-        if (!TextUtils.isEmpty(html)) {
-            android.util.Log.d("SaoHuo", ">>> head=" + html.substring(0, Math.min(400, html.length())));
-        }
-
         JSONArray list = parseList(html, 0);
-        android.util.Log.d("SaoHuo", ">>> list=" + list.length());
 
-        // 分页
         int pagecount = page;
         Document doc = Jsoup.parse(html == null ? "" : html);
         Elements pageLinks = doc.select(".page a, .pagination a, #page a, .pages a");
@@ -482,7 +448,7 @@ public class SaoHuo extends Spider {
         return result.toString();
     }
 
-    // ==================== 播放 ====================
+    // ==================== 播放（照反编译版：只取 iframe.src，parse=1） ====================
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -490,113 +456,25 @@ public class SaoHuo extends Spider {
         String playPageUrl = id.startsWith("http") ? id : (host + id);
 
         String html = request(playPageUrl);
+
+        String iframeSrc = "";
         if (!TextUtils.isEmpty(html)) {
-            String direct = extractM3u8(html);
-            if (!TextUtils.isEmpty(direct)) return buildResult(0, direct, null);
+            Document doc = Jsoup.parse(html);
+            Element iframe = doc.selectFirst("iframe");
+            if (iframe != null) iframeSrc = iframe.attr("src");
         }
+        if (TextUtils.isEmpty(iframeSrc)) iframeSrc = playPageUrl;
 
-        String hhUrl = extractHhUrl(html);
-        if (TextUtils.isEmpty(hhUrl)) return buildResult(0, playPageUrl, null);
-
-        String hhHtml = request(hhUrl, playPageUrl);
-        if (!TextUtils.isEmpty(hhHtml)) {
-            String direct = extractM3u8(hhHtml);
-            if (!TextUtils.isEmpty(direct)) return buildResult(0, direct, null);
-        }
-
-        JSONObject boot = extractBootstrap(hhHtml);
-        if (boot == null
-                || TextUtils.isEmpty(boot.optString("url"))
-                || TextUtils.isEmpty(boot.optString("key"))) {
-            return buildResult(0, hhUrl, null);
-        }
-
-        String hhDomain = "";
-        Matcher dm = Pattern.compile("^https?://([^/]+)").matcher(hhUrl);
-        if (dm.find()) hhDomain = dm.group(1);
-        String apiUrl = "https://" + hhDomain + "/api/parse";
-
-        JSONObject postBody = new JSONObject();
-        postBody.put("url", boot.optString("url"));
-        postBody.put("t", boot.optString("t"));
-        postBody.put("key", boot.optString("key"));
-        postBody.put("client_fallback", false);
-
-        String respText = postJson(apiUrl, postBody, hhUrl);
-        if (TextUtils.isEmpty(respText)) return buildResult(0, hhUrl, null);
-
-        JSONObject resp;
-        try {
-            resp = new JSONObject(respText);
-        } catch (Exception e) {
-            String fb = extractM3u8(respText);
-            if (!TextUtils.isEmpty(fb)) return buildResult(0, fb, null);
-            return buildResult(0, hhUrl, null);
-        }
-
-        if (resp.optInt("code", 0) != 200 || TextUtils.isEmpty(resp.optString("url"))) {
-            return buildResult(0, hhUrl, null);
-        }
-
-        String m3u8 = resp.optString("url").replace("\\u0026", "&").replace("\\/", "/");
-
-        JSONObject headers = new JSONObject();
-        headers.put("Referer", hhUrl);
-        headers.put("User-Agent", UA);
+        JSONObject headerObj = new JSONObject();
+        headerObj.put("User-Agent", UA);
+        headerObj.put("Referer", playPageUrl);
+        if (!TextUtils.isEmpty(cookie)) headerObj.put("Cookie", cookie);
 
         JSONObject result = new JSONObject();
-        result.put("parse", 0);
-        result.put("url", m3u8);
+        result.put("parse", 1);
         result.put("jx", 0);
-        result.put("headers", headers);
+        result.put("url", iframeSrc);
+        result.put("header", headerObj.toString());
         return result.toString();
-    }
-
-    private String buildResult(int parse, String url, JSONObject headers) throws Exception {
-        JSONObject result = new JSONObject();
-        result.put("parse", parse);
-        result.put("url", url);
-        result.put("jx", 0);
-        if (headers != null) result.put("headers", headers);
-        return result.toString();
-    }
-
-    // ==================== 解析工具 ====================
-
-    private String extractHhUrl(String html) {
-        if (TextUtils.isEmpty(html)) return "";
-        Matcher m = Pattern.compile(
-                "<iframe[^>]+src=[\"'](https?://[^\"']+[?&]url=[A-Za-z0-9]+)[\"']",
-                Pattern.CASE_INSENSITIVE).matcher(html);
-        if (m.find()) return m.group(1).replace("&amp;", "&");
-        m = Pattern.compile("(https?://[^\"'\\s<>]+[?&]url=[A-Za-z0-9]+)").matcher(html);
-        if (m.find()) return m.group(1).replace("&amp;", "&");
-        return "";
-    }
-
-    private JSONObject extractBootstrap(String html) {
-        if (TextUtils.isEmpty(html)) return null;
-        Matcher m = Pattern.compile("__HHJX_BOOTSTRAP__\\s*=\\s*(\\{[^}]+})").matcher(html);
-        if (!m.find()) return null;
-        try { return new JSONObject(m.group(1)); } catch (Exception e) { return null; }
-    }
-
-    private String extractM3u8(String text) {
-        if (TextUtils.isEmpty(text)) return "";
-        String[] patterns = {
-                "\"url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
-                "\"m3u8_url\"\\s*:\\s*\"(https?:[^\"]+?\\.m3u8[^\"]*)\"",
-                "(https?:[^\"'\\s\\\\<>]+?\\.m3u8[^\"'\\s\\\\<>]*)"
-        };
-        for (String p : patterns) {
-            Matcher m = Pattern.compile(p, Pattern.CASE_INSENSITIVE).matcher(text);
-            if (m.find() && m.group(1) != null) {
-                return m.group(1)
-                        .replace("\\u0026", "&")
-                        .replace("\\/", "/")
-                        .replace("&amp;", "&");
-            }
-        }
-        return "";
     }
 }
