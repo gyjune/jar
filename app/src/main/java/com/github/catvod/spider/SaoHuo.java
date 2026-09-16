@@ -29,7 +29,9 @@ import okhttp3.Response;
 
 /**
  * 骚火影视 SaoHuo
- * 对应 cat_骚火.js，带 cookie 会话维护
+ * 参考反编译版逻辑重写：
+ *  - 分类URL: /list/{cateId}-{page}.html
+ *  - cookie: 从首页响应头 set-cookie 获取
  */
 public class SaoHuo extends Spider {
 
@@ -37,14 +39,15 @@ public class SaoHuo extends Spider {
     private String cookie = "";
 
     private static final String UA =
-            "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) AppleWebKit/537.36";
+            "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/91.0.4472.114 Safari/537.36";
 
-    // ==================== 请求（带 cookie 维护） ====================
+    // ==================== 请求 ====================
 
     private Map<String, String> headers() {
         Map<String, String> h = new HashMap<>();
         h.put("User-Agent", UA);
-        h.put("accept-language", "zh-CN,zh;q=0.9");
+        h.put("accept-language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7");
         if (!TextUtils.isEmpty(cookie)) h.put("Cookie", cookie);
         return h;
     }
@@ -55,16 +58,13 @@ public class SaoHuo extends Spider {
         return h;
     }
 
-    /** GET，自动维护 cookie */
     private String request(String url) {
         return request(url, null);
     }
 
     private String request(String url, String referer) {
         try {
-            Request.Builder builder = new Request.Builder()
-                    .url(url)
-                    .get();
+            Request.Builder builder = new Request.Builder().url(url).get();
             for (Map.Entry<String, String> e : headers(referer).entrySet()) {
                 builder.addHeader(e.getKey(), e.getValue());
             }
@@ -74,16 +74,12 @@ public class SaoHuo extends Spider {
         }
     }
 
-    /** POST JSON，自动维护 cookie */
     private String postJson(String url, JSONObject body, String referer) {
         try {
             RequestBody rb = RequestBody.create(
                     MediaType.parse("application/json; charset=utf-8"),
                     body.toString());
-
-            Request.Builder builder = new Request.Builder()
-                    .url(url)
-                    .post(rb);
+            Request.Builder builder = new Request.Builder().url(url).post(rb);
             Map<String, String> h = headers();
             h.put("Content-Type", "application/json; charset=utf-8");
             if (!TextUtils.isEmpty(referer)) h.put("Referer", referer);
@@ -96,28 +92,25 @@ public class SaoHuo extends Spider {
         }
     }
 
-    /** 统一执行：读 body + 更新 cookie */
+    /** 执行请求 + 读 body + 更新 cookie */
     private String execute(Request request) {
         Response response = null;
         try {
             OkHttpClient client = OkHttpUtil.defaultClient();
             response = client.newCall(request).execute();
 
-            // 更新 cookie
             List<String> setCookies = response.headers("Set-Cookie");
             if (setCookies != null && !setCookies.isEmpty()) {
-                Map<String, String> cookieMap = parseCookie(cookie);
+                Map<String, String> map = parseCookie(cookie);
                 for (String c : setCookies) {
                     int end = c.indexOf(';');
                     if (end > 0) c = c.substring(0, end);
                     int eq = c.indexOf('=');
                     if (eq > 0) {
-                        String k = c.substring(0, eq).trim();
-                        String v = c.substring(eq + 1).trim();
-                        cookieMap.put(k, v);
+                        map.put(c.substring(0, eq).trim(), c.substring(eq + 1).trim());
                     }
                 }
-                cookie = joinCookie(cookieMap);
+                cookie = joinCookie(map);
             }
 
             if (response.body() == null) return "";
@@ -156,6 +149,7 @@ public class SaoHuo extends Spider {
     public void init(Context context, String extend) throws Exception {
         super.init(context, extend);
         if (!TextUtils.isEmpty(extend)) host = extend.trim();
+        // 先请求一次首页，拿到 cookie
         request(host);
     }
 
@@ -163,9 +157,13 @@ public class SaoHuo extends Spider {
 
     @Override
     public String homeContent(boolean filter) throws Exception {
+        // ★ 确保 cookie 已拿到
+        if (TextUtils.isEmpty(cookie)) request(host);
+
         JSONArray classes = new JSONArray();
         classes.put(clazz("1", "电影"));
         classes.put(clazz("2", "电视剧"));
+        classes.put(clazz("20", "国产剧"));
         classes.put(clazz("4", "动漫"));
 
         JSONObject filters = new JSONObject();
@@ -223,7 +221,7 @@ public class SaoHuo extends Spider {
 
     @Override
     public String homeVideoContent() throws Exception {
-        if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
+        if (TextUtils.isEmpty(cookie)) request(host);
         String html = request(host);
         JSONObject result = new JSONObject();
         if (TextUtils.isEmpty(html)) {
@@ -287,34 +285,38 @@ public class SaoHuo extends Spider {
     @Override
     public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend)
             throws Exception {
-        if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
+        if (TextUtils.isEmpty(cookie)) request(host);
+
         int page = 1;
         try { page = Integer.parseInt(pg); } catch (Exception ignored) {}
         if (page < 1) page = 1;
 
         String cateId = (extend != null && !TextUtils.isEmpty(extend.get("cateId")))
                 ? extend.get("cateId") : tid;
-        String url = host + "/list/" + cateId;
-        if (page > 1) url += "-" + page;
-        url += ".html";
+
+        // ★ 关键改动：/list/{cateId}-{page}.html，第1页也带 -1
+        String url = host + String.format("/list/%s-%s.html", cateId, page);
+
+        android.util.Log.d("SaoHuo", ">>> url=" + url);
+        android.util.Log.d("SaoHuo", ">>> cookie=" + cookie);
 
         String html = request(url);
-        if (TextUtils.isEmpty(html)) {
-            JSONObject r = new JSONObject();
-            r.put("list", new JSONArray());
-            r.put("page", page);
-            r.put("pagecount", 1);
-            return r.toString();
+
+        android.util.Log.d("SaoHuo", ">>> len=" + (html == null ? 0 : html.length()));
+        if (!TextUtils.isEmpty(html)) {
+            android.util.Log.d("SaoHuo", ">>> head=" + html.substring(0, Math.min(400, html.length())));
         }
 
         JSONArray list = parseList(html, 0);
+        android.util.Log.d("SaoHuo", ">>> list=" + list.length());
 
+        // 分页
         int pagecount = page;
-        Document doc = Jsoup.parse(html);
+        Document doc = Jsoup.parse(html == null ? "" : html);
         Elements pageLinks = doc.select(".page a, .pagination a, #page a, .pages a");
         if (!pageLinks.isEmpty()) {
             int maxPage = 0;
-            Pattern p = Pattern.compile("[-_](\\d+)\\.html");
+            Pattern p = Pattern.compile("-?(\\d+)\\.html");
             for (Element a : pageLinks) {
                 Matcher m = p.matcher(a.attr("href"));
                 if (m.find()) {
@@ -342,7 +344,7 @@ public class SaoHuo extends Spider {
 
     @Override
     public String detailContent(List<String> ids) throws Exception {
-        if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
+        if (TextUtils.isEmpty(cookie)) request(host);
         String id = ids.get(0);
         String url = id.startsWith("http") ? id : (host + id);
         String html = request(url);
@@ -459,22 +461,16 @@ public class SaoHuo extends Spider {
     }
 
     private static class Ep {
-        String text;
-        String href;
+        String text, href;
         int num;
-
-        Ep(String t, String h, int n) {
-            this.text = t;
-            this.href = h;
-            this.num = n;
-        }
+        Ep(String t, String h, int n) { text = t; href = h; num = n; }
     }
 
     // ==================== 搜索 ====================
 
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
-        if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
+        if (TextUtils.isEmpty(cookie)) request(host);
         String url = host + "/s----------.html?wd=" + URLEncoder.encode(key, "UTF-8");
         String html = request(url);
         JSONObject result = new JSONObject();
@@ -490,7 +486,7 @@ public class SaoHuo extends Spider {
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
+        if (TextUtils.isEmpty(cookie)) request(host);
         String playPageUrl = id.startsWith("http") ? id : (host + id);
 
         String html = request(playPageUrl);
@@ -500,9 +496,7 @@ public class SaoHuo extends Spider {
         }
 
         String hhUrl = extractHhUrl(html);
-        if (TextUtils.isEmpty(hhUrl)) {
-            return buildResult(0, playPageUrl, null);
-        }
+        if (TextUtils.isEmpty(hhUrl)) return buildResult(0, playPageUrl, null);
 
         String hhHtml = request(hhUrl, playPageUrl);
         if (!TextUtils.isEmpty(hhHtml)) {
@@ -529,9 +523,7 @@ public class SaoHuo extends Spider {
         postBody.put("client_fallback", false);
 
         String respText = postJson(apiUrl, postBody, hhUrl);
-        if (TextUtils.isEmpty(respText)) {
-            return buildResult(0, hhUrl, null);
-        }
+        if (TextUtils.isEmpty(respText)) return buildResult(0, hhUrl, null);
 
         JSONObject resp;
         try {
@@ -546,9 +538,7 @@ public class SaoHuo extends Spider {
             return buildResult(0, hhUrl, null);
         }
 
-        String m3u8 = resp.optString("url")
-                .replace("\\u0026", "&")
-                .replace("\\/", "/");
+        String m3u8 = resp.optString("url").replace("\\u0026", "&").replace("\\/", "/");
 
         JSONObject headers = new JSONObject();
         headers.put("Referer", hhUrl);
@@ -579,7 +569,6 @@ public class SaoHuo extends Spider {
                 "<iframe[^>]+src=[\"'](https?://[^\"']+[?&]url=[A-Za-z0-9]+)[\"']",
                 Pattern.CASE_INSENSITIVE).matcher(html);
         if (m.find()) return m.group(1).replace("&amp;", "&");
-
         m = Pattern.compile("(https?://[^\"'\\s<>]+[?&]url=[A-Za-z0-9]+)").matcher(html);
         if (m.find()) return m.group(1).replace("&amp;", "&");
         return "";
@@ -589,11 +578,7 @@ public class SaoHuo extends Spider {
         if (TextUtils.isEmpty(html)) return null;
         Matcher m = Pattern.compile("__HHJX_BOOTSTRAP__\\s*=\\s*(\\{[^}]+})").matcher(html);
         if (!m.find()) return null;
-        try {
-            return new JSONObject(m.group(1));
-        } catch (Exception e) {
-            return null;
-        }
+        try { return new JSONObject(m.group(1)); } catch (Exception e) { return null; }
     }
 
     private String extractM3u8(String text) {
