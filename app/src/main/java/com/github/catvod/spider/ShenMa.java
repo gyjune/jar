@@ -24,8 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * 神马影院 - www.smyyok.com
- * 严格按猫影视 / TVBox 官方规范
- * playerContent 只返回 {"url":"..."}
+ * playerContent 返回 {"parse":0/1, "url":"...", "jx":0/1}
  */
 public class ShenMa extends Spider {
 
@@ -38,9 +37,6 @@ public class ShenMa extends Spider {
     private static final Pattern playerPattern = Pattern.compile(
             "var\\s+player_aaaa\\s*=\\s*(\\{[^;]+\\})");
 
-    // ============================================================
-    // header
-    // ============================================================
     private Map<String, String> getHeader() {
         Map<String, String> header = new HashMap<>();
         header.put("User-Agent", userAgent);
@@ -52,9 +48,6 @@ public class ShenMa extends Spider {
         return OkHttp.string(url, getHeader());
     }
 
-    // ============================================================
-    // buildVodShowUrl（11 个 '-'）
-    // ============================================================
     private String buildVodShowUrl(String tid, String area, String sort, String pg, String year, String cls) {
         String[] parts = new String[12];
         Arrays.fill(parts, "");
@@ -71,9 +64,6 @@ public class ShenMa extends Spider {
         return url.toString();
     }
 
-    // ============================================================
-    // 列表解析
-    // ============================================================
     private JSONArray extractList(String html) throws Exception {
         JSONArray list = new JSONArray();
         if (TextUtils.isEmpty(html)) return list;
@@ -102,9 +92,6 @@ public class ShenMa extends Spider {
         return list;
     }
 
-    // ============================================================
-    // 提取 m3u8
-    // ============================================================
     private String extractM3u8(String html) {
         if (TextUtils.isEmpty(html)) return null;
 
@@ -131,9 +118,6 @@ public class ShenMa extends Spider {
         return null;
     }
 
-    // ============================================================
-    // 首页
-    // ============================================================
     @Override
     public String homeContent(boolean filter) throws Exception {
         JSONObject result = new JSONObject();
@@ -288,9 +272,6 @@ public class ShenMa extends Spider {
         return arr;
     }
 
-    // ============================================================
-    // 分类
-    // ============================================================
     @Override
     public String categoryContent(String tid, String pg, boolean filter,
                                   HashMap<String, String> extend) throws Exception {
@@ -319,9 +300,6 @@ public class ShenMa extends Spider {
         return result.toString();
     }
 
-    // ============================================================
-    // 详情
-    // ============================================================
     @Override
     public String detailContent(List<String> ids) throws Exception {
         String vodId = ids.get(0);
@@ -427,9 +405,6 @@ public class ShenMa extends Spider {
         return result.toString();
     }
 
-    // ============================================================
-    // 搜索
-    // ============================================================
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
         String encoded = URLEncoder.encode(key, "UTF-8");
@@ -441,7 +416,7 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（只返回 {"url":"..."}）
+    // ★ playerContent（带 jx）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -449,14 +424,18 @@ public class ShenMa extends Spider {
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 0);
                 result.put("url", id);
+                result.put("jx", 0);
                 return result.toString();
             }
 
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 1);
                 result.put("url", id);
+                result.put("jx", 1);
                 return result.toString();
             }
 
@@ -464,24 +443,27 @@ public class ShenMa extends Spider {
             if (!TextUtils.isEmpty(videoUrl)) {
                 SpiderDebug.log("direct m3u8=" + videoUrl);
                 JSONObject result = new JSONObject();
+                result.put("parse", 0);
                 result.put("url", videoUrl);
+                result.put("jx", 0);
                 return result.toString();
             }
 
             JSONObject result = new JSONObject();
+            result.put("parse", 1);
             result.put("url", id);
+            result.put("jx", 1);
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
+            result.put("parse", 1);
             result.put("url", id);
+            result.put("jx", 1);
             return result.toString();
         }
     }
 
-    // ============================================================
-    // 工具
-    // ============================================================
     private String fixUrl(String url) {
         if (TextUtils.isEmpty(url)) return "";
         url = url.trim();
