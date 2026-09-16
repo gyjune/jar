@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * 神马影院 - www.smyyok.com
- * 严格按官方 wiki：playerContent 只返回 {"url":"..."}
+ * playerContent 返回 {"parse":0/1,"url":"..."}
  */
 public class ShenMa extends Spider {
 
@@ -440,7 +440,7 @@ public class ShenMa extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（只返回 {"url":"..."}）
+    // ★ playerContent（带 parse）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
@@ -448,6 +448,7 @@ public class ShenMa extends Spider {
             if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
                     Pattern.CASE_INSENSITIVE).matcher(id).find()) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 0);
                 result.put("url", id);
                 return result.toString();
             }
@@ -455,6 +456,7 @@ public class ShenMa extends Spider {
             String html = req(id);
             if (TextUtils.isEmpty(html)) {
                 JSONObject result = new JSONObject();
+                result.put("parse", 1);
                 result.put("url", id);
                 return result.toString();
             }
@@ -463,16 +465,19 @@ public class ShenMa extends Spider {
             if (!TextUtils.isEmpty(videoUrl)) {
                 SpiderDebug.log("direct m3u8=" + videoUrl);
                 JSONObject result = new JSONObject();
+                result.put("parse", 0);
                 result.put("url", videoUrl);
                 return result.toString();
             }
 
             JSONObject result = new JSONObject();
+            result.put("parse", 1);
             result.put("url", id);
             return result.toString();
         } catch (Exception e) {
             SpiderDebug.log(e);
             JSONObject result = new JSONObject();
+            result.put("parse", 1);
             result.put("url", id);
             return result.toString();
         }
