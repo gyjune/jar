@@ -2,7 +2,6 @@ package com.github.catvod.spider;
 
 import android.text.TextUtils;
 
-import com.github.catvod.bean.Result;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
@@ -26,7 +25,7 @@ import java.util.regex.Pattern;
 /**
  * 毒舌电影 - www.dushehub.com
  * 严格按猫影视 / TVBox 官方规范
- * playerContent 只返回 Result.get().url(url).string()
+ * playerContent 只返回 {"url":"..."}
  */
 public class DuShe extends Spider {
 
@@ -258,7 +257,6 @@ public class DuShe extends Spider {
         if (TextUtils.isEmpty(content)) content = doc.select(".vod_content").text();
         if (TextUtils.isEmpty(content)) content = doc.select("meta[name=description]").attr("content");
 
-        // 线路/选集
         List<String> tabNames = new ArrayList<>();
         Elements tabItems = doc.select(".module-tab-item");
         for (Element tab : tabItems) {
@@ -320,66 +318,78 @@ public class DuShe extends Spider {
     }
 
     // ============================================================
-    // ★ playerContent（严格按官方规范：只返回 url）
+    // ★ playerContent（只返回 {"url":"..."}）
     // ============================================================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        // 1. id 本身是直链
-        if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
-                Pattern.CASE_INSENSITIVE).matcher(id).find()) {
-            return Result.get().url(id).string();
-        }
-
-        // 2. 抓播放页
-        String html = req(id);
-        if (TextUtils.isEmpty(html)) {
-            return Result.get().url(id).string();
-        }
-
-        // 3. 抠 player_aaaa
-        String realUrl = "";
-        String from = "";
-        String next = "";
-        String title = "";
-
-        Matcher pm = playerPattern.matcher(html);
-        if (pm.find()) {
-            try {
-                String raw = pm.group(1);
-                raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
-                raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
-                raw = raw.replace("\\/", "/");
-                raw = raw.replaceAll(",\\s*}", "}");
-                JSONObject p = new JSONObject(raw);
-                realUrl = p.optString("url", "");
-                from = p.optString("from", "");
-                next = p.optString("link_next", "");
-                if (next.startsWith("/")) next = siteUrl + next;
-                JSONObject vd = p.optJSONObject("vod_data");
-                if (vd != null) title = vd.optString("vod_name", "");
-            } catch (Exception e) {
-                SpiderDebug.log("player_aaaa parse error");
+        try {
+            if (id != null && Pattern.compile("\\.(m3u8|mp4|flv|mkv|webm|ts)",
+                    Pattern.CASE_INSENSITIVE).matcher(id).find()) {
+                JSONObject result = new JSONObject();
+                result.put("url", id);
+                return result.toString();
             }
-        }
 
-        if (TextUtils.isEmpty(realUrl)) {
-            return Result.get().url(id).string();
-        }
+            String html = req(id);
+            if (TextUtils.isEmpty(html)) {
+                JSONObject result = new JSONObject();
+                result.put("url", id);
+                return result.toString();
+            }
 
-        // 4. m3u8 直连 → 返回 m3u8
-        if (realUrl.contains(".m3u8") || realUrl.contains(".mp4")) {
-            SpiderDebug.log("direct m3u8=" + realUrl);
-            return Result.get().url(realUrl).string();
-        }
+            String realUrl = "";
+            String from = "";
+            String next = "";
+            String title = "";
 
-        // 5. 不是 m3u8 → 走代理，把代理地址塞进 url
-        String proxyUrl = "https://v.dushe.online/?url=" + URLEncoder.encode(realUrl, "UTF-8")
-                + "&next=" + URLEncoder.encode(next, "UTF-8")
-                + "&tittle=" + URLEncoder.encode(title, "UTF-8")
-                + "&t=" + URLEncoder.encode(from, "UTF-8")
-                + "&d=v2";
-        SpiderDebug.log("proxy=" + proxyUrl);
-        return Result.get().url(proxyUrl).string();
+            Matcher pm = playerPattern.matcher(html);
+            if (pm.find()) {
+                try {
+                    String raw = pm.group(1);
+                    raw = raw.replaceAll("([{,])\\s*([a-zA-Z0-9_]+)\\s*:", "$1\"$2\":");
+                    raw = raw.replaceAll(":\\s*'([^']*)'", ":\"$1\"");
+                    raw = raw.replace("\\/", "/");
+                    raw = raw.replaceAll(",\\s*}", "}");
+                    JSONObject p = new JSONObject(raw);
+                    realUrl = p.optString("url", "");
+                    from = p.optString("from", "");
+                    next = p.optString("link_next", "");
+                    if (next.startsWith("/")) next = siteUrl + next;
+                    JSONObject vd = p.optJSONObject("vod_data");
+                    if (vd != null) title = vd.optString("vod_name", "");
+                } catch (Exception e) {
+                    SpiderDebug.log("player_aaaa parse error");
+                }
+            }
+
+            if (TextUtils.isEmpty(realUrl)) {
+                JSONObject result = new JSONObject();
+                result.put("url", id);
+                return result.toString();
+            }
+
+            if (realUrl.contains(".m3u8") || realUrl.contains(".mp4")) {
+                SpiderDebug.log("direct m3u8=" + realUrl);
+                JSONObject result = new JSONObject();
+                result.put("url", realUrl);
+                return result.toString();
+            }
+
+            String proxyUrl = "https://v.dushe.online/?url=" + URLEncoder.encode(realUrl, "UTF-8")
+                    + "&next=" + URLEncoder.encode(next, "UTF-8")
+                    + "&tittle=" + URLEncoder.encode(title, "UTF-8")
+                    + "&t=" + URLEncoder.encode(from, "UTF-8")
+                    + "&d=v2";
+            SpiderDebug.log("proxy=" + proxyUrl);
+            JSONObject result = new JSONObject();
+            result.put("url", proxyUrl);
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+            JSONObject result = new JSONObject();
+            result.put("url", id);
+            return result.toString();
+        }
     }
 
     // ============================================================
