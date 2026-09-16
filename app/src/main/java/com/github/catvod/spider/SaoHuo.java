@@ -16,15 +16,20 @@ import org.jsoup.select.Elements;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
 /**
  * 骚火影视 SaoHuo
- * 对应 cat_骚火.js
+ * 对应 cat_骚火.js，带 cookie 会话维护
  */
 public class SaoHuo extends Spider {
 
@@ -34,7 +39,7 @@ public class SaoHuo extends Spider {
     private static final String UA =
             "Mozilla/5.0 (Linux; Android 9; ALN-AL00 Build/PQ3B.190801.05281406; wv) AppleWebKit/537.36";
 
-    // ==================== 基础请求 ====================
+    // ==================== 请求（带 cookie 维护） ====================
 
     private Map<String, String> headers() {
         Map<String, String> h = new HashMap<>();
@@ -44,54 +49,117 @@ public class SaoHuo extends Spider {
         return h;
     }
 
-    private Map<String, String> headers(String extraReferer) {
+    private Map<String, String> headers(String referer) {
         Map<String, String> h = headers();
-        if (!TextUtils.isEmpty(extraReferer)) h.put("Referer", extraReferer);
+        if (!TextUtils.isEmpty(referer)) h.put("Referer", referer);
         return h;
     }
 
-    /**
-     * GET 请求，自动维护 cookie
-     */
+    /** GET，自动维护 cookie */
     private String request(String url) {
         return request(url, null);
     }
 
     private String request(String url, String referer) {
         try {
-            Map<String, String> h = headers(referer);
-            // OkHttpUtil 无法直接拿 set-cookie 的场景：这里只用简化版
-            String content = OkHttpUtil.string(url, h);
-            return content == null ? "" : content;
+            Request.Builder builder = new Request.Builder()
+                    .url(url)
+                    .get();
+            for (Map.Entry<String, String> e : headers(referer).entrySet()) {
+                builder.addHeader(e.getKey(), e.getValue());
+            }
+            return execute(builder.build());
         } catch (Exception e) {
             return "";
         }
     }
 
-    /**
-     * POST JSON，参考 JS 的 postJson
-     */
+    /** POST JSON，自动维护 cookie */
     private String postJson(String url, JSONObject body, String referer) {
         try {
+            RequestBody rb = RequestBody.create(
+                    MediaType.parse("application/json; charset=utf-8"),
+                    body.toString());
+
+            Request.Builder builder = new Request.Builder()
+                    .url(url)
+                    .post(rb);
             Map<String, String> h = headers();
-            h.put("Content-Type", "application/json");
+            h.put("Content-Type", "application/json; charset=utf-8");
             if (!TextUtils.isEmpty(referer)) h.put("Referer", referer);
-            return OkHttpUtil.post(url, h, body.toString());
+            for (Map.Entry<String, String> e : h.entrySet()) {
+                builder.addHeader(e.getKey(), e.getValue());
+            }
+            return execute(builder.build());
         } catch (Exception e) {
             return "";
         }
     }
 
-    // ==================== init / 首页 ====================
+    /** 统一执行：读 body + 更新 cookie */
+    private String execute(Request request) {
+        Response response = null;
+        try {
+            OkHttpClient client = OkHttpUtil.defaultClient();
+            response = client.newCall(request).execute();
+
+            // 更新 cookie
+            List<String> setCookies = response.headers("Set-Cookie");
+            if (setCookies != null && !setCookies.isEmpty()) {
+                Map<String, String> cookieMap = parseCookie(cookie);
+                for (String c : setCookies) {
+                    int end = c.indexOf(';');
+                    if (end > 0) c = c.substring(0, end);
+                    int eq = c.indexOf('=');
+                    if (eq > 0) {
+                        String k = c.substring(0, eq).trim();
+                        String v = c.substring(eq + 1).trim();
+                        cookieMap.put(k, v);
+                    }
+                }
+                cookie = joinCookie(cookieMap);
+            }
+
+            if (response.body() == null) return "";
+            byte[] bytes = response.body().bytes();
+            return new String(bytes, "UTF-8");
+        } catch (Exception e) {
+            return "";
+        } finally {
+            if (response != null) response.close();
+        }
+    }
+
+    private Map<String, String> parseCookie(String c) {
+        Map<String, String> map = new HashMap<>();
+        if (TextUtils.isEmpty(c)) return map;
+        for (String part : c.split(";")) {
+            part = part.trim();
+            int eq = part.indexOf('=');
+            if (eq > 0) map.put(part.substring(0, eq).trim(), part.substring(eq + 1).trim());
+        }
+        return map;
+    }
+
+    private String joinCookie(Map<String, String> map) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : map.entrySet()) {
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(e.getKey()).append("=").append(e.getValue());
+        }
+        return sb.toString();
+    }
+
+    // ==================== init ====================
 
     @Override
     public void init(Context context, String extend) throws Exception {
         super.init(context, extend);
-        if (!TextUtils.isEmpty(extend)) {
-            host = extend.trim();
-        }
+        if (!TextUtils.isEmpty(extend)) host = extend.trim();
         request(host);
     }
+
+    // ==================== 首页 ====================
 
     @Override
     public String homeContent(boolean filter) throws Exception {
@@ -101,26 +169,23 @@ public class SaoHuo extends Spider {
         classes.put(clazz("4", "动漫"));
 
         JSONObject filters = new JSONObject();
-        filters.put("1", arr(
-                filterItem("cateId", "类型", new String[][]{
-                        {"全部", "1"}, {"喜剧", "6"}, {"爱情", "7"}, {"恐怖", "8"},
-                        {"动作", "9"}, {"科幻", "10"}, {"战争", "11"}, {"犯罪", "12"},
-                        {"动画", "13"}, {"奇幻", "14"}, {"剧情", "15"}, {"冒险", "16"},
-                        {"悬疑", "17"}, {"惊悚", "18"}, {"其他", "20"}
-                })));
-        filters.put("2", arr(
-                filterItem("cateId", "类型", new String[][]{
-                        {"全部", "2"}, {"国产剧", "20"}, {"TVB", "21"}, {"韩剧", "22"},
-                        {"美剧", "23"}, {"日剧", "24"}, {"英剧", "25"}, {"台剧", "26"},
-                        {"其他", "27"}
-                })));
-        filters.put("4", arr(
-                filterItem("cateId", "类型", new String[][]{
-                        {"全部", "4"}, {"搞笑", "38"}, {"恋爱", "39"}, {"热血", "40"},
-                        {"格斗", "41"}, {"美少女", "42"}, {"魔法", "43"}, {"机战", "44"},
-                        {"校园", "45"}, {"亲子", "46"}, {"童话", "47"}, {"冒险", "48"},
-                        {"真人", "49"}, {"LOLI", "50"}, {"其他", "51"}
-                })));
+        filters.put("1", arr(filterItem("cateId", "类型", new String[][]{
+                {"全部", "1"}, {"喜剧", "6"}, {"爱情", "7"}, {"恐怖", "8"},
+                {"动作", "9"}, {"科幻", "10"}, {"战争", "11"}, {"犯罪", "12"},
+                {"动画", "13"}, {"奇幻", "14"}, {"剧情", "15"}, {"冒险", "16"},
+                {"悬疑", "17"}, {"惊悚", "18"}, {"其他", "20"}
+        })));
+        filters.put("2", arr(filterItem("cateId", "类型", new String[][]{
+                {"全部", "2"}, {"国产剧", "20"}, {"TVB", "21"}, {"韩剧", "22"},
+                {"美剧", "23"}, {"日剧", "24"}, {"英剧", "25"}, {"台剧", "26"},
+                {"其他", "27"}
+        })));
+        filters.put("4", arr(filterItem("cateId", "类型", new String[][]{
+                {"全部", "4"}, {"搞笑", "38"}, {"恋爱", "39"}, {"热血", "40"},
+                {"格斗", "41"}, {"美少女", "42"}, {"魔法", "43"}, {"机战", "44"},
+                {"校园", "45"}, {"亲子", "46"}, {"童话", "47"}, {"冒险", "48"},
+                {"真人", "49"}, {"LOLI", "50"}, {"其他", "51"}
+        })));
 
         JSONObject result = new JSONObject();
         result.put("class", classes);
@@ -160,14 +225,12 @@ public class SaoHuo extends Spider {
     public String homeVideoContent() throws Exception {
         if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
         String html = request(host);
-        if (TextUtils.isEmpty(html)) {
-            JSONObject r = new JSONObject();
-            r.put("list", new JSONArray());
-            return r.toString();
-        }
-        JSONArray list = parseList(html, 6);
         JSONObject result = new JSONObject();
-        result.put("list", list);
+        if (TextUtils.isEmpty(html)) {
+            result.put("list", new JSONArray());
+            return result.toString();
+        }
+        result.put("list", parseList(html, 6));
         return result.toString();
     }
 
@@ -191,8 +254,8 @@ public class SaoHuo extends Spider {
             String href = a.attr("href");
             String title = a.attr("title");
             if (TextUtils.isEmpty(title)) {
-                Element img = a.selectFirst("img");
-                if (img != null) title = img.attr("alt");
+                Element img0 = a.selectFirst("img");
+                if (img0 != null) title = img0.attr("alt");
             }
             if (TextUtils.isEmpty(href) || TextUtils.isEmpty(title)) continue;
 
@@ -365,10 +428,10 @@ public class SaoHuo extends Spider {
         vod.put("vod_year", vodYear);
         vod.put("vod_remarks", vodRemarks);
 
-        JSONArray arr = new JSONArray();
-        arr.put(vod);
+        JSONArray jsonArray = new JSONArray();
+        jsonArray.put(vod);
         JSONObject result = new JSONObject();
-        result.put("list", arr);
+        result.put("list", jsonArray);
         return result.toString();
     }
 
@@ -430,13 +493,10 @@ public class SaoHuo extends Spider {
         if (TextUtils.isEmpty(host)) host = "https://shdy2.com";
         String playPageUrl = id.startsWith("http") ? id : (host + id);
 
-        // 1. 播放页直链
         String html = request(playPageUrl);
         if (!TextUtils.isEmpty(html)) {
             String direct = extractM3u8(html);
-            if (!TextUtils.isEmpty(direct)) {
-                return buildResult(0, direct, null);
-            }
+            if (!TextUtils.isEmpty(direct)) return buildResult(0, direct, null);
         }
 
         String hhUrl = extractHhUrl(html);
@@ -444,13 +504,10 @@ public class SaoHuo extends Spider {
             return buildResult(0, playPageUrl, null);
         }
 
-        // 2. HHPlayer 页
         String hhHtml = request(hhUrl, playPageUrl);
         if (!TextUtils.isEmpty(hhHtml)) {
             String direct = extractM3u8(hhHtml);
-            if (!TextUtils.isEmpty(direct)) {
-                return buildResult(0, direct, null);
-            }
+            if (!TextUtils.isEmpty(direct)) return buildResult(0, direct, null);
         }
 
         JSONObject boot = extractBootstrap(hhHtml);
@@ -460,7 +517,6 @@ public class SaoHuo extends Spider {
             return buildResult(0, hhUrl, null);
         }
 
-        // 3. POST /api/parse
         String hhDomain = "";
         Matcher dm = Pattern.compile("^https?://([^/]+)").matcher(hhUrl);
         if (dm.find()) hhDomain = dm.group(1);
@@ -477,7 +533,7 @@ public class SaoHuo extends Spider {
             return buildResult(0, hhUrl, null);
         }
 
-        JSONObject resp = null;
+        JSONObject resp;
         try {
             resp = new JSONObject(respText);
         } catch (Exception e) {
@@ -519,7 +575,8 @@ public class SaoHuo extends Spider {
 
     private String extractHhUrl(String html) {
         if (TextUtils.isEmpty(html)) return "";
-        Matcher m = Pattern.compile("<iframe[^>]+src=[\"'](https?://[^\"']+[?&]url=[A-Za-z0-9]+)[\"']",
+        Matcher m = Pattern.compile(
+                "<iframe[^>]+src=[\"'](https?://[^\"']+[?&]url=[A-Za-z0-9]+)[\"']",
                 Pattern.CASE_INSENSITIVE).matcher(html);
         if (m.find()) return m.group(1).replace("&amp;", "&");
 
